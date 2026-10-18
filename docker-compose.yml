@@ -1,0 +1,46 @@
+services:
+  legado-web:
+    build: .
+    ports:
+      - "8955:8080"
+    volumes:
+      - ./data:/data
+    environment:
+      # 默认使用 SQLite（数据在 ./data/legado.db）。改用 PostgreSQL 时取消下面的注释
+      # LEGADO_DB_TYPE: postgres
+      # LEGADO_DB_URL: jdbc:postgresql://postgres:5432/legado
+      # LEGADO_DB_USER: legado
+      # LEGADO_DB_PASSWORD: legado
+      TZ: Asia/Shanghai
+    restart: unless-stopped
+    # depends_on: [postgres]
+    networks:
+      - legado-network
+
+  # 浏览器（可选）：webView:true 的书源、远程浏览器（系统设置中开启）需要。
+  # 取消下面的注释启动后，在后台“系统设置”的“浏览器调试地址”中填写 http://browser:9222。
+  # 每次打开网页都在新的浏览器上下文（相当于无痕窗口）中进行，用完销毁，不会在浏览器里留下数据。
+  # 调试端口没有密码，不要映射到公网。
+  cloak:
+    image: cloakhq/cloakbrowser
+    container_name: cloak
+    command: cloakserve
+    restart: unless-stopped
+    networks:
+      - legado-network
+
+  # postgres:
+  #   image: postgres:17-alpine
+  #   environment:
+  #     POSTGRES_DB: legado
+  #     POSTGRES_USER: legado
+  #     POSTGRES_PASSWORD: legado
+  #   volumes:
+  #     - ./pgdata:/var/lib/postgresql/data
+  #   restart: unless-stopped
+  #   networks:
+  #    - legado-network
+
+networks:
+  legado-network:
+    driver: bridge

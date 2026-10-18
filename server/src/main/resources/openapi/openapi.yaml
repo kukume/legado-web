@@ -1,0 +1,226 @@
+openapi: 3.0.3
+info:
+  title: 阅读 Web 开放接口
+  version: "1.0"
+  description: |
+    使用 API Key 访问自己的书架与正文。在网页“我的 → API Key”中生成密钥（明文只显示一次）。
+
+    鉴权方式任选一种：
+    - 请求头 `X-API-Key: lgd_xxx`
+    - 请求头 `Authorization: Bearer lgd_xxx`
+    - 查询参数 `?api_key=lgd_xxx`
+
+    点击右侧 **Authorize** 填入密钥后即可在本页直接调用。
+servers:
+  - url: /openapi/v1
+security:
+  - ApiKeyHeader: []
+  - BearerKey: []
+  - ApiKeyQuery: []
+tags:
+  - name: 书架
+  - name: 阅读
+paths:
+  /shelf:
+    get:
+      tags: [书架]
+      summary: 查询书架
+      operationId: getShelf
+      responses:
+        "200":
+          description: 书架中的书
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Book" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /books/{id}:
+    get:
+      tags: [书架]
+      summary: 书本详情（含章节目录）
+      operationId: getBook
+      parameters:
+        - $ref: "#/components/parameters/BookId"
+      responses:
+        "200":
+          description: 书本信息与完整目录
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BookDetail" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /books/{id}/content:
+    get:
+      tags: [阅读]
+      summary: 阅读正文（可切换章节）
+      description: |
+        `index` 为 `next` / `prev` 时相对当前阅读进度计算，并自动跳过卷名。
+        默认会把返回的章节记为阅读进度，所以连续请求 `index=next` 就能一章章往后读。
+      operationId: getContent
+      parameters:
+        - $ref: "#/components/parameters/BookId"
+        - name: index
+          in: query
+          description: 章节序号（从 0 开始），或 `current`（当前进度）/ `next`（下一章）/ `prev`（上一章）
+          schema:
+            type: string
+            default: current
+            example: next
+        - name: saveProgress
+          in: query
+          description: 是否把该章记为阅读进度
+          schema: { type: boolean, default: true }
+        - name: refresh
+          in: query
+          description: 忽略缓存，重新从书源获取
+          schema: { type: boolean, default: false }
+      responses:
+        "200":
+          description: 章节正文
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChapterContent" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502":
+          description: 书源请求失败
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /books/{id}/progress:
+    put:
+      tags: [阅读]
+      summary: 保存阅读进度
+      description: |
+        只记录进度，不获取正文。适合先预加载后面章节（`saveProgress=false`）、真正翻到时再记录进度的客户端。
+        以服务器时间记录，会覆盖其他设备更早的进度。
+      operationId: saveProgress
+      parameters:
+        - $ref: "#/components/parameters/BookId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [index]
+              properties:
+                index: { type: integer, description: 章节序号（从 0 开始） }
+                pos: { type: integer, default: 0, description: 章内位置（比例 0~10000，0 为章节开头） }
+                title: { type: string, description: 章节标题，不填时取目录中的标题 }
+      responses:
+        "200":
+          description: 已保存
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+components:
+  securitySchemes:
+    ApiKeyHeader:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    BearerKey:
+      type: http
+      scheme: bearer
+      description: "Authorization: Bearer lgd_xxx"
+    ApiKeyQuery:
+      type: apiKey
+      in: query
+      name: api_key
+  parameters:
+    BookId:
+      name: id
+      in: path
+      required: true
+      description: 书本 id（来自书架接口）
+      schema: { type: integer, format: int64 }
+  responses:
+    BadRequest:
+      description: 参数错误（如 index 越界、已经是最后一章）
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: API Key 缺失、无效或已被删除
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: 书籍不存在（或不属于该用户）
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: { type: string, example: API Key 无效或已被删除 }
+    Book:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        bookUrl: { type: string }
+        tocUrl: { type: string }
+        origin: { type: string, description: 书源地址 }
+        originName: { type: string, description: 书源名称 }
+        name: { type: string }
+        author: { type: string }
+        kind: { type: string, nullable: true }
+        coverUrl: { type: string, nullable: true }
+        intro: { type: string, nullable: true }
+        type: { type: integer, description: 书籍类型（Legado 位标记） }
+        groupId: { type: integer, format: int64 }
+        inShelf: { type: boolean }
+        latestChapterTitle: { type: string, nullable: true }
+        latestChapterTime: { type: integer, format: int64 }
+        lastCheckTime: { type: integer, format: int64 }
+        lastCheckCount: { type: integer, description: 上次更新新增章节数 }
+        totalChapterNum: { type: integer }
+        durChapterTitle: { type: string, nullable: true, description: 当前阅读章节标题 }
+        durChapterIndex: { type: integer, description: 当前阅读章节序号 }
+        durChapterPos: { type: integer }
+        durChapterTime: { type: integer, format: int64, description: 最近阅读时间（毫秒） }
+        wordCount: { type: string, nullable: true }
+        canUpdate: { type: boolean }
+        order: { type: integer }
+        customCoverUrl: { type: string, nullable: true }
+        customIntro: { type: string, nullable: true }
+        sourceId: { type: integer, format: int64, nullable: true, description: 书源 id，书源已不可用时为 null }
+    Chapter:
+      type: object
+      properties:
+        index: { type: integer }
+        title: { type: string }
+        isVolume: { type: boolean, description: 是否卷名（没有正文） }
+        isVip: { type: boolean }
+        isPay: { type: boolean }
+        tag: { type: string, nullable: true }
+        cached: { type: boolean, description: 服务端是否已缓存正文 }
+    BookDetail:
+      type: object
+      properties:
+        book: { $ref: "#/components/schemas/Book" }
+        chapters:
+          type: array
+          items: { $ref: "#/components/schemas/Chapter" }
+    ChapterContent:
+      type: object
+      properties:
+        bookId: { type: integer, format: int64 }
+        bookName: { type: string }
+        index: { type: integer }
+        title: { type: string }
+        content: { type: string, description: 正文，段落以换行分隔 }
+        prevIndex: { type: integer, nullable: true, description: 上一章序号，没有时为 null }
+        nextIndex: { type: integer, nullable: true, description: 下一章序号，没有时为 null }
+        totalChapters: { type: integer }
+        cached: { type: boolean }

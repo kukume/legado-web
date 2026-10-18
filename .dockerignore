@@ -1,0 +1,14 @@
+# 构建镜像时不需要发送给 Docker 的文件（依赖和构建产物在镜像里重新生成）
+.git
+.github
+.idea
+.gradle
+.kotlin
+**/build
+data
+*.db
+*.db-wal
+*.db-shm
+web/node_modules
+web/dist
+server/src/main/resources/static

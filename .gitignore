@@ -1,0 +1,13 @@
+.gradle/
+build/
+data/
+*.db
+*.db-wal
+*.db-shm
+.idea/
+*.iml
+.kotlin/
+
+web/node_modules/
+web/dist/
+server/src/main/resources/static/

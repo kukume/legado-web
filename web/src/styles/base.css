@@ -1,0 +1,187 @@
+:root {
+  --app-bg: #f6f1e7;
+  --app-surface: #fffdf8;
+  --app-border: #e6dccb;
+  --app-text: #2b2419;
+  --app-text-2: #7a6d5a;
+  --app-accent: #9c6b30;
+  --app-shadow: 0 1px 3px rgba(80, 60, 30, 0.08), 0 6px 18px rgba(80, 60, 30, 0.06);
+}
+
+:root[data-theme='dark'] {
+  --app-bg: #16140f;
+  --app-surface: #211e18;
+  --app-border: #37312680;
+  --app-text: #e8e0d2;
+  --app-text-2: #a39886;
+  --app-accent: #d4a15c;
+  --app-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--app-bg);
+  color: var(--app-text);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#app {
+  min-height: 100vh;
+}
+
+a {
+  color: inherit;
+}
+
+.page {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.page-header h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  flex: 1;
+  min-width: 120px;
+}
+
+/* 规则页各标签顶部：说明文字 + 操作按钮 */
+.rule-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.rule-desc {
+  flex: 1 1 260px;
+  margin: 0;
+  font-size: 13px;
+}
+
+/* 手机：说明独占一行，全选和按钮排在下面 */
+@media (max-width: 767px) {
+  .rule-desc {
+    flex-basis: 100%;
+  }
+}
+
+.muted {
+  color: var(--app-text-2);
+}
+
+.ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ellipsis-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.card {
+  background: var(--app-surface);
+  border: 1px solid var(--app-border);
+  border-radius: 12px;
+  box-shadow: var(--app-shadow);
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+}
+
+@media (max-width: 767px) {
+  .page {
+    padding: 12px 12px 80px;
+  }
+}
+
+/*
+ * 手机端：iOS Safari 在聚焦字号小于 16px 的输入框时会自动放大页面，
+ * 触屏设备上把输入框字号统一提到 16px 以避免放大（不禁用双指缩放）
+ */
+@media (pointer: coarse) {
+  input,
+  textarea,
+  select,
+  .n-input .n-input__input-el,
+  .n-input .n-input__textarea-el,
+  .n-input .n-input__placeholder,
+  .n-base-selection-input,
+  .n-input-number .n-input__input-el {
+    font-size: 16px !important;
+  }
+}
+
+/* 手机上的紧凑列表（utils/mobileTable.ts）：不显示表头，全选放在工具栏 */
+.m-table .n-data-table-thead {
+  display: none;
+}
+
+/* 名称和下面一行小字 */
+.m-row {
+  min-width: 0;
+}
+
+.m-name {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  font-size: 14px;
+  line-height: 1.35;
+  word-break: break-all;
+}
+
+.m-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--app-text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 工具栏里的全选（手机） */
+.select-all {
+  margin-right: 4px;
+}
+
+/* 远程浏览器弹窗：手机上占满屏幕宽度，网页视口尽量接近手机屏幕（弹窗挂在 body 下，不能用组件内样式） */
+@media (max-width: 767px) {
+  .n-card.remote-modal {
+    width: 100vw !important;
+    max-width: 100vw;
+    margin: 0;
+    border-radius: 0;
+  }
+
+  .remote-modal > .n-card-header,
+  .remote-modal > .n-card-content,
+  .remote-modal > .n-card__footer {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+}

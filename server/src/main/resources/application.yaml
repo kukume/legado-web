@@ -1,0 +1,41 @@
+ktor:
+  deployment:
+    port: "$PORT:8080"
+    host: "$HOST:0.0.0.0"
+  application:
+    modules:
+      - io.legado.web.ApplicationKt.module
+
+legado:
+  # 数据目录（SQLite 数据库、缓存、自动生成的 JWT 密钥）
+  dataDir: "$LEGADO_DATA_DIR:./data"
+  # 外部前端目录（可选，留空则使用打包进 jar 的前端）
+  webDir: "$LEGADO_WEB_DIR:"
+  db:
+    # sqlite 或 postgres
+    type: "$LEGADO_DB_TYPE:sqlite"
+    # 留空时：sqlite 使用 dataDir/legado.db；postgres 使用 jdbc:postgresql://localhost:5432/legado
+    url: "$LEGADO_DB_URL:"
+    user: "$LEGADO_DB_USER:"
+    password: "$LEGADO_DB_PASSWORD:"
+    maxPoolSize: "$LEGADO_DB_POOL:10"
+  jwt:
+    # 留空时自动生成并保存到 dataDir/.jwt-secret
+    secret: "$LEGADO_JWT_SECRET:"
+    issuer: "legado-web"
+    expireDays: "$LEGADO_JWT_EXPIRE_DAYS:30"
+  engine:
+    userAgent: "$LEGADO_USER_AGENT:"
+    # 书源登录信息的加密密钥（留空时自动生成并保存到 dataDir/.engine-secret）
+    secret: "$LEGADO_ENGINE_SECRET:"
+    # 目录、正文多页并发数
+    threadCount: "$LEGADO_THREAD_COUNT:8"
+    # 多书源搜索并发数
+    searchConcurrency: "$LEGADO_SEARCH_CONCURRENCY:16"
+    # 单书源搜索超时（毫秒）
+    searchTimeout: "$LEGADO_SEARCH_TIMEOUT:30000"
+  # 允许跨域的前端地址（逗号分隔，开发时可设为 http://localhost:5173）
+  cors: "$LEGADO_CORS:"
+  captcha:
+    # 设为 true 时忽略“系统设置”里的 Cap 人机验证（Cap 服务不可用、管理员无法登录时临时使用）
+    disabled: "$LEGADO_CAPTCHA_DISABLED:false"

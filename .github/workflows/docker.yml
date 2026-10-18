@@ -1,0 +1,85 @@
+# 构建 Docker 镜像并发布到 GitHub Container Registry（ghcr.io/<owner>/<repo>）
+# 和 Docker Hub（<用户名>/legado-web，需要在仓库 Settings → Secrets and variables → Actions 中
+# 添加 DOCKERHUB_USERNAME 和 DOCKERHUB_TOKEN（Docker Hub 的访问令牌，权限 Read & Write）；没有添加时只发布到 ghcr.io）
+# - 推送到默认分支：发布 latest 和 sha-<短提交号>
+# - 推送 v* 标签（如 v1.2.3）：额外发布 1.2.3、1.2
+# - Pull Request：只构建检查，不发布
+# - 也可以在 Actions 页面手动运行
+name: Docker
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  # if 条件里不能直接读取 secrets，先放到环境变量里。用户名放在 Variables 或 Secrets 都可以
+  # （放在 Secrets 里时，日志中的镜像名会显示为 ***）
+  DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # 镜像名必须小写
+      - name: Image name
+        id: name
+        run: |
+          echo "image=${REGISTRY}/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          if [ -n "$DOCKERHUB_USERNAME" ]; then echo "dockerhub=${DOCKERHUB_USERNAME,,}/legado-web" >> "$GITHUB_OUTPUT"; fi
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        if: github.event_name != 'pull_request' && env.DOCKERHUB_USERNAME != ''
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Tags and labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          # 没有配置 Docker Hub 时第二行为空，会被忽略
+          images: |
+            ${{ steps.name.outputs.image }}
+            ${{ steps.name.outputs.dockerhub }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-
+            type=ref,event=pr
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
