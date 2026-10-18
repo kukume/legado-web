@@ -1,0 +1,283 @@
+package io.legado.app.data.entities
+
+import io.legado.app.constant.AppPattern
+import io.legado.app.constant.BookSourceType
+import io.legado.app.data.entities.rule.BookInfoRule
+import io.legado.app.data.entities.rule.ContentRule
+import io.legado.app.data.entities.rule.ExploreRule
+import io.legado.app.data.entities.rule.ReviewRule
+import io.legado.app.data.entities.rule.SearchRule
+import io.legado.app.data.entities.rule.TocRule
+import io.legado.app.utils.GSON
+import io.legado.app.utils.fromJsonObject
+import io.legado.app.utils.splitNotBlank
+
+@Suppress("unused")
+data class BookSource(
+    // 地址，包括 http/https
+    var bookSourceUrl: String = "",
+    // 名称
+    var bookSourceName: String = "",
+    // 分组
+    var bookSourceGroup: String? = null,
+    // 类型，0 文本，1 音频, 2 图片, 3 文件（指的是类似知轩藏书只提供下载的网站）, 4 视频
+    var bookSourceType: Int = 0,
+    // 详情页url正则
+    var bookUrlPattern: String? = null,
+    // 手动排序编号
+    var customOrder: Int = 0,
+    // 是否启用
+    var enabled: Boolean = true,
+    // 启用发现
+    var enabledExplore: Boolean = true,
+    // js库
+    override var jsLib: String? = null,
+    // 启用okhttp CookieJAr 自动保存每次请求的cookie
+    override var enabledCookieJar: Boolean? = true,
+    // 并发率
+    override var concurrentRate: String? = null,
+    // 请求头
+    override var header: String? = null,
+    // 登录地址
+    override var loginUrl: String? = null,
+    // 登录UI
+    override var loginUi: String? = null,
+    // 登录检测js
+    var loginCheckJs: String? = null,
+    // 封面解密js
+    var coverDecodeJs: String? = null,
+    // 注释
+    var bookSourceComment: String? = null,
+    // 自定义变量说明
+    var variableComment: String? = null,
+    // 最后更新时间，用于排序
+    var lastUpdateTime: Long = 0,
+    // 响应时间，用于排序
+    var respondTime: Long = 180000L,
+    // 智能排序的权重
+    var weight: Int = 0,
+    // 发现url
+    var exploreUrl: String? = null,
+    // 发现筛选规则
+    var exploreScreen: String? = null,
+    // 发现规则
+    var ruleExplore: ExploreRule? = null,
+    // 搜索url
+    var searchUrl: String? = null,
+    // 搜索规则
+    var ruleSearch: SearchRule? = null,
+    // 书籍信息页规则
+    var ruleBookInfo: BookInfoRule? = null,
+    // 目录页规则
+    var ruleToc: TocRule? = null,
+    // 正文页规则
+    var ruleContent: ContentRule? = null,
+    // 段评规则
+    var ruleReview: ReviewRule? = null,
+    // 纯 JavaScript 单文件书源主脚本，非空时优先使用脚本抓取流程
+    var mainJs: String? = null,
+    var eventListener: Boolean = false, // 是否监听事件来执行回调规则
+    var customButton: Boolean = false //由书源控制的自定义按钮
+) : BaseSource {
+
+    override fun getTag(): String {
+        return bookSourceName
+    }
+
+    override fun getKey(): String {
+        return bookSourceUrl
+    }
+
+    override fun hashCode(): Int {
+        return bookSourceUrl.hashCode()
+    }
+
+    override fun equals(other: Any?): Boolean {
+        return if (other is BookSource) other.bookSourceUrl == bookSourceUrl else false
+    }
+
+    fun getSearchRule(): SearchRule {
+        ruleSearch?.let { return it }
+        val rule = SearchRule()
+        ruleSearch = rule
+        return rule
+    }
+
+    fun getExploreRule(): ExploreRule {
+        ruleExplore?.let { return it }
+        val rule = ExploreRule()
+        ruleExplore = rule
+        return rule
+    }
+
+    fun getBookInfoRule(): BookInfoRule {
+        ruleBookInfo?.let { return it }
+        val rule = BookInfoRule()
+        ruleBookInfo = rule
+        return rule
+    }
+
+    fun getTocRule(): TocRule {
+        ruleToc?.let { return it }
+        val rule = TocRule()
+        ruleToc = rule
+        return rule
+    }
+
+    fun getContentRule(): ContentRule {
+        ruleContent?.let { return it }
+        val rule = ContentRule()
+        ruleContent = rule
+        return rule
+    }
+
+//    fun getReviewRule(): ReviewRule {
+//        ruleReview?.let { return it }
+//        val rule = ReviewRule()
+//        ruleReview = rule
+//        return rule
+//    }
+
+    fun getDisPlayNameGroup(): String {
+        return if (bookSourceGroup.isNullOrBlank()) {
+            bookSourceName
+        } else {
+            String.format("%s (%s)", bookSourceName, bookSourceGroup)
+        }
+    }
+
+    fun addGroup(groups: String): BookSource {
+        bookSourceGroup?.splitNotBlank(AppPattern.splitGroupRegex)
+            ?.toCollection(linkedSetOf())?.let {
+            it.addAll(groups.splitNotBlank(AppPattern.splitGroupRegex))
+            bookSourceGroup = it.joinToString(",")
+        }
+        if (bookSourceGroup.isNullOrBlank()) bookSourceGroup = groups
+        return this
+    }
+
+    fun removeGroup(groups: String): BookSource {
+        bookSourceGroup?.splitNotBlank(AppPattern.splitGroupRegex)
+            ?.toCollection(linkedSetOf())?.let {
+            it.removeAll(groups.splitNotBlank(AppPattern.splitGroupRegex).toSet())
+            bookSourceGroup = it.joinToString(",")
+        }
+        return this
+    }
+
+    fun hasGroup(group: String): Boolean {
+        bookSourceGroup?.splitNotBlank(AppPattern.splitGroupRegex)?.toHashSet()?.let {
+            return it.indexOf(group) != -1
+        }
+        return false
+    }
+
+    fun removeInvalidGroups() {
+        removeGroup(getInvalidGroupNames())
+    }
+
+    fun removeErrorComment() {
+        bookSourceComment = bookSourceComment
+            ?.split("\n\n")
+            ?.filterNot {
+                it.startsWith("// Error: ")
+            }?.joinToString("\n")
+    }
+
+    fun addErrorComment(e: Throwable) {
+        bookSourceComment =
+            "// Error: ${e.localizedMessage}" + if (bookSourceComment.isNullOrBlank())
+                "" else "\n\n${bookSourceComment}"
+    }
+
+    fun getCheckKeyword(default: String): String {
+        ruleSearch?.checkKeyWord?.let {
+            if (it.isNotBlank() && !it.contains("http")  && !it.contains("::") && !it.contains("++") && !it.contains("--")) {
+                return it
+            }
+        }
+        return default
+    }
+
+    fun getInvalidGroupNames(): String {
+        return bookSourceGroup?.splitNotBlank(AppPattern.splitGroupRegex)?.toHashSet()?.filter {
+            "失效" in it || it == "校验超时"
+        }?.joinToString() ?: ""
+    }
+
+    fun getDisplayVariableComment(otherComment: String): String {
+        return if (variableComment.isNullOrBlank()) {
+            otherComment
+        } else {
+            "${variableComment}\n$otherComment"
+        }
+    }
+
+    fun isJsSource(): Boolean = !mainJs.isNullOrBlank()
+
+    /**
+     * 是否支持批量下载正文。
+     * 常规源需要配置批量规则和大于1的最大批量数量;
+     * JS源的批量规则是 getContentBatch 函数,只看 config.maxBatchSize。
+     */
+    fun supportContentBatch(): Boolean {
+        val rule = ruleContent ?: return false
+        if ((rule.maxBatchSize ?: 0) <= 1) return false
+        return isJsSource() || !rule.contentBatch.isNullOrBlank()
+    }
+
+    /**
+     * 每批下载的章节数,未配置或不支持批量时返回1
+     */
+    fun contentBatchSize(): Int {
+        if (!supportContentBatch()) return 1
+        return (ruleContent?.maxBatchSize ?: 1).coerceIn(1, MAX_CONTENT_BATCH_SIZE)
+    }
+    /** Ranking, timing and list toggles do not change the rules being checked. */
+    fun checkContent(): String = GSON.toJson(copy(
+        customOrder = 0, enabled = true, enabledExplore = true,
+        lastUpdateTime = 0, respondTime = 0, weight = 0,
+    ))
+
+    override fun getLoginJs(): String? {
+        return if (isJsSource()) mainJs else super.getLoginJs()
+    }
+
+    fun equal(source: BookSource): Boolean {
+        return equal(bookSourceName, source.bookSourceName)
+                && equal(bookSourceUrl, source.bookSourceUrl)
+                && equal(bookSourceGroup, source.bookSourceGroup)
+                && bookSourceType == source.bookSourceType
+                && equal(bookUrlPattern, source.bookUrlPattern)
+                && equal(bookSourceComment, source.bookSourceComment)
+                && customOrder == source.customOrder
+                && enabled == source.enabled
+                && enabledExplore == source.enabledExplore
+                && enabledCookieJar == source.enabledCookieJar
+                && equal(variableComment, source.variableComment)
+                && equal(concurrentRate, source.concurrentRate)
+                && equal(jsLib, source.jsLib)
+                && equal(mainJs, source.mainJs)
+                && equal(header, source.header)
+                && equal(loginUrl, source.loginUrl)
+                && equal(loginUi, source.loginUi)
+                && equal(loginCheckJs, source.loginCheckJs)
+                && equal(coverDecodeJs, source.coverDecodeJs)
+                && equal(exploreUrl, source.exploreUrl)
+                && equal(searchUrl, source.searchUrl)
+                && getSearchRule() == source.getSearchRule()
+                && getExploreRule() == source.getExploreRule()
+                && getBookInfoRule() == source.getBookInfoRule()
+                && getTocRule() == source.getTocRule()
+                && getContentRule() == source.getContentRule()
+                && ruleReview == source.ruleReview
+    }
+
+    private fun equal(a: String?, b: String?) = a == b || (a.isNullOrEmpty() && b.isNullOrEmpty())
+
+    companion object {
+        /** 单批章节数上限,防止书源声明过大的批量导致内存和超时问题 */
+        const val MAX_CONTENT_BATCH_SIZE = 50
+    }
+
+}

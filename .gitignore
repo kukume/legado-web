@@ -1,6 +1,7 @@
 .gradle/
-build/
-data/
+/build/
+/server/build/
+/data/
 *.db
 *.db-wal
 *.db-shm
