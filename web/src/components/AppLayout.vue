@@ -1,19 +1,49 @@
 <script setup lang="ts">
-import { computed, h, type Component } from 'vue'
+import { computed, h, watch, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NIcon, NDropdown, NButton } from 'naive-ui'
+import { NIcon, NDropdown, NButton, useNotification } from 'naive-ui'
 import {
   LibraryOutline, SearchOutline, CompassOutline, CodeSlashOutline, PersonCircleOutline,
   ShieldCheckmarkOutline, SwapHorizontalOutline, MoonOutline, SunnyOutline, ContrastOutline,
 } from '@vicons/ionicons5'
 import { useAuthStore } from '@/stores/auth'
 import { useUiStore } from '@/stores/ui'
+import { useUpdateStore, versionName } from '@/stores/update'
 import { t } from '@/i18n'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const ui = useUiStore()
+const updates = useUpdateStore()
+const notification = useNotification()
+
+// 管理员打开网页时检查一次更新：有新版本时侧边栏“管理”上显示提示点，
+// 并弹出一次通知（同一个新版本只提示一次，手机上没有“管理”入口也能看到）
+const NOTIFIED_KEY = 'legado_update_notified'
+watch(
+  () => auth.isAdmin,
+  async (admin) => {
+    if (!admin) return
+    await updates.autoCheck()
+    const s = updates.status
+    if (!s?.hasUpdate || !s.latestTime) return
+    try {
+      if (localStorage.getItem(NOTIFIED_KEY) === String(s.latestTime)) return
+      localStorage.setItem(NOTIFIED_KEY, String(s.latestTime))
+    } catch {
+      /* 无法保存时每次打开都提示 */
+    }
+    const n = notification.info({
+      title: t('发现新版本'),
+      content: t('新版本 {0}，当前版本 {1}', [versionName(s.latestTime), versionName(s.buildTime)]),
+      action: () =>
+        h(NButton, { size: 'small', type: 'primary', onClick: () => { n.destroy(); router.push({ name: 'admin' }) } }, () => t('查看')),
+      duration: 15000,
+    })
+  },
+  { immediate: true },
+)
 
 interface NavItem {
   name: string
@@ -73,6 +103,7 @@ function renderIcon(icon: Component) {
         >
           <n-icon size="20"><component :is="item.icon" /></n-icon>
           <span>{{ item.label }}</span>
+          <span v-if="item.name === 'admin' && updates.hasUpdate" class="nav-dot" :title="t('发现新版本')" />
         </router-link>
       </nav>
       <div class="sidebar-footer">
@@ -162,6 +193,14 @@ function renderIcon(icon: Component) {
 .nav-item:hover {
   background: color-mix(in srgb, var(--app-accent) 8%, transparent);
   color: var(--app-text);
+}
+
+.nav-dot {
+  width: 7px;
+  height: 7px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--app-accent);
 }
 
 .nav-item.active {

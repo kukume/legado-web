@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { NButton, NCard, NDescriptions, NDescriptionsItem, NInput, NRadioButton, NRadioGroup, NSpace, NTag, useMessage } from 'naive-ui'
+import { NButton, NCard, NDescriptions, NDescriptionsItem, NInput, NRadioButton, NRadioGroup, NSpace, useMessage } from 'naive-ui'
 import InviteManager from '@/components/InviteManager.vue'
 import ApiKeyManager from '@/components/ApiKeyManager.vue'
 import OfflineManager from '@/components/OfflineManager.vue'
 import BackupManager from '@/components/BackupManager.vue'
-import TtsEngineManager from '@/components/TtsEngineManager.vue'
 import ReadingStatsCard from '@/components/ReadingStatsCard.vue'
 import { authApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
@@ -51,11 +50,6 @@ function logout() {
     <n-card :title="t('账号')" size="small" class="block">
       <n-descriptions :column="1" label-placement="left" size="small">
         <n-descriptions-item :label="t('用户名')">{{ auth.user?.username }}</n-descriptions-item>
-        <n-descriptions-item :label="t('角色')">
-          <n-tag size="small" :type="auth.isAdmin ? 'warning' : 'default'" :bordered="false">
-            {{ auth.isAdmin ? t('管理员') : t('普通用户') }}
-          </n-tag>
-        </n-descriptions-item>
         <n-descriptions-item :label="t('注册时间')">{{ formatDate(auth.user?.createdAt) }}</n-descriptions-item>
       </n-descriptions>
       <template #header-extra>
@@ -81,10 +75,6 @@ function logout() {
         </n-radio-group>
       </div>
       <p class="muted small">{{ t('只对这台设备上的浏览器生效，切换后页面会刷新。') }}</p>
-    </n-card>
-
-    <n-card id="tts" :title="t('朗读引擎')" size="small" class="block">
-      <tts-engine-manager />
     </n-card>
 
     <n-card :title="t('离线阅读')" size="small" class="block">

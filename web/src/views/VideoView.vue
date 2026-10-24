@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { goBack } from '@/utils/navigation'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NDrawer, NDrawerContent, NDropdown, NIcon, NSpin, useMessage } from 'naive-ui'
@@ -485,8 +486,7 @@ function onBeforeUnload() {
 }
 
 function back() {
-  if (window.history.state?.back) router.back()
-  else router.push({ name: 'book', params: { id: bookId.value } })
+  goBack(router, { name: 'book', params: { id: bookId.value } })
 }
 </script>
 

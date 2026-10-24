@@ -2,11 +2,15 @@
 import { computed, h, onMounted, ref } from 'vue'
 import {
   NAlert, NButton, NDataTable, NIcon, NInput, NInputNumber, NModal, NRadioButton, NRadioGroup,
-  NSpace, NSwitch, NTabs, NTabPane, NTag, useDialog, useMessage, type DataTableColumns,
+  NSpace, NSwitch, NTabs, NTabPane, useDialog, useMessage, type DataTableColumns,
 } from 'naive-ui'
-import { BookOutline, GlobeOutline, HomeOutline, LockClosedOutline, PeopleOutline, ShieldCheckmarkOutline } from '@vicons/ionicons5'
+import { BookOutline, CloudDownloadOutline, GlobeOutline, HomeOutline, LockClosedOutline, PeopleOutline, ShieldCheckmarkOutline } from '@vicons/ionicons5'
 import InviteManager from '@/components/InviteManager.vue'
+import { useIsMobile } from '@/composables/useIsMobile'
+import { mobileColumns } from '@/utils/mobileTable'
 import { adminApi } from '@/api'
+import { useUpdateStore, versionName } from '@/stores/update'
+import { copyText } from '@/utils/clipboard'
 import type { User } from '@/api/types'
 import { useAuthStore } from '@/stores/auth'
 import { formatDate, formatTime } from '@/utils/media'
@@ -57,7 +61,35 @@ function resetSettings() {
 onMounted(() => {
   loadUsers()
   loadSettings()
+  updates.load().catch(() => {})
 })
+
+// ---------------- 检查更新：比较本镜像与仓库里 latest 镜像的构建时间 ----------------
+
+const updates = useUpdateStore()
+const updateStatus = computed(() => updates.status)
+const checkingUpdate = ref(false)
+const UPGRADE_CMD = 'docker compose pull && docker compose up -d'
+const buildTimeText = (sec: number | null | undefined) => (sec ? formatDate(sec * 1000) : '')
+
+async function checkUpdate() {
+  checkingUpdate.value = true
+  try {
+    const s = await updates.check()
+    if (s.error) message.error(t('检查更新失败：{0}', [s.error]))
+    else if (s.hasUpdate) message.info(t('发现新版本'))
+    else message.success(t('已是最新版本'))
+  } catch (e: any) {
+    message.error(e.message)
+  } finally {
+    checkingUpdate.value = false
+  }
+}
+
+async function copyUpgradeCmd() {
+  await copyText(UPGRADE_CMD)
+  message.success(t('已复制'))
+}
 
 async function update(u: User, data: { enabled?: boolean; password?: string; canAddSource?: boolean }) {
   try {
@@ -87,45 +119,39 @@ function remove(u: User) {
 
 const nameOf = (id: number | null) => users.value.find((u) => u.id === id)?.username ?? '-'
 
-const columns: DataTableColumns<User> = [
-  { title: 'ID', key: 'id', width: 60 },
-  { title: t('用户名'), key: 'username' },
-  {
-    // 管理员只有第一个注册的用户，不能在这里修改
-    title: t('角色'),
-    key: 'role',
-    width: 90,
-    render: (u) =>
-      u.role === 'admin'
-        ? h(NTag, { size: 'small', type: 'warning', bordered: false }, () => t('管理员'))
-        : h('span', { class: 'muted' }, t('用户')),
-  },
+const desktopColumns: DataTableColumns<User> = [
+  // 用户名、邀请人平分剩余宽度，其余列按内容定宽；操作列固定在右侧，手机上横向滚动时也能看到
+  { title: 'ID', key: 'id', width: 56 },
+  { title: t('用户名'), key: 'username', minWidth: 140, ellipsis: { tooltip: true } },
   {
     title: t('启用'),
     key: 'enabled',
-    width: 70,
+    width: 72,
+    align: 'center',
     render: (u) => h(NSwitch, { size: 'small', value: u.enabled, disabled: u.id === auth.user?.id, onUpdateValue: (v: boolean) => update(u, { enabled: v }) }),
   },
   {
     title: t('添加书源'),
     key: 'canAddSource',
-    width: 90,
+    width: 100,
+    align: 'center',
+    // 管理员始终可以添加书源：显示为开启且不可修改
     render: (u) =>
-      u.role === 'admin'
-        ? h('span', { class: 'muted', style: 'font-size:12px' }, t('管理员'))
-        : h(NSwitch, {
-            size: 'small',
-            value: u.canAddSource,
-            onUpdateValue: (v: boolean) => update(u, { canAddSource: v }),
-          }),
+      h(NSwitch, {
+        size: 'small',
+        value: u.role === 'admin' || u.canAddSource,
+        disabled: u.role === 'admin',
+        title: u.role === 'admin' ? t('管理员始终可以添加书源') : undefined,
+        onUpdateValue: (v: boolean) => update(u, { canAddSource: v }),
+      }),
   },
-  { title: t('邀请人'), key: 'invitedBy', width: 100, render: (u) => nameOf(u.invitedBy) },
+  { title: t('邀请人'), key: 'invitedBy', minWidth: 120, ellipsis: { tooltip: true }, render: (u) => nameOf(u.invitedBy) },
   { title: t('注册时间'), key: 'createdAt', width: 150, render: (u) => formatDate(u.createdAt) },
-  { title: t('最近登录'), key: 'lastLoginAt', width: 110, render: (u) => formatTime(u.lastLoginAt) },
   {
     title: t('操作'),
     key: 'op',
     width: 150,
+    fixed: 'right',
     render: (u) =>
       h(NSpace, { size: 4, wrap: false }, () => [
         h(NButton, { size: 'tiny', onClick: () => { resetTarget.value = u; resetPwd.value = '' } }, () => t('重置密码')),
@@ -133,6 +159,30 @@ const columns: DataTableColumns<User> = [
       ]),
   },
 ]
+
+/** 手机上与书源列表一样：用户名（下面一行注册时间、邀请人） | 启用 | ⋮ 菜单 */
+const isMobile = useIsMobile()
+const mobileCols = computed(() =>
+  mobileColumns<User>({
+    selectable: false,
+    name: (u) => u.username,
+    sub: (u) =>
+      [formatDate(u.createdAt), u.invitedBy ? t('邀请人：{0}', [nameOf(u.invitedBy)]) : '', u.role === 'admin' ? t('管理员') : '']
+        .filter(Boolean)
+        .join(' · '),
+    enabled: (u) => u.enabled,
+    disabled: (u) => u.id === auth.user?.id,
+    onToggle: (u, v) => update(u, { enabled: v }),
+    actions: (u) => [
+      { key: 'reset', label: t('重置密码'), onSelect: () => { resetTarget.value = u; resetPwd.value = '' } },
+      ...(u.role === 'admin'
+        ? []
+        : [{ key: 'source', label: u.canAddSource ? t('取消添加书源权限') : t('允许添加书源'), onSelect: () => update(u, { canAddSource: !u.canAddSource }) }]),
+      ...(u.id !== auth.user?.id ? [{ key: 'delete', label: t('删除'), danger: true, onSelect: () => remove(u) }] : []),
+    ],
+  }),
+)
+const columns = computed(() => (isMobile.value ? mobileCols.value : desktopColumns))
 
 async function doReset() {
   if (!resetTarget.value || resetPwd.value.length < 6) return message.warning(t('密码至少 6 位'))
@@ -185,13 +235,28 @@ async function saveSettings() {
 <template>
   <div class="page">
     <div class="page-header"><h2>{{ t('系统管理') }}</h2></div>
+    <n-alert v-if="updateStatus?.hasUpdate" type="info" :title="t('发现新版本')" class="update-alert">
+      {{ t('新版本 {0}，当前版本 {1}。在 docker compose 所在目录执行下面的命令升级：', [versionName(updateStatus.latestTime), versionName(updateStatus.buildTime)]) }}
+      <div class="upgrade-cmd">
+        <code>{{ UPGRADE_CMD }}</code>
+        <n-button size="tiny" @click="copyUpgradeCmd">{{ t('复制') }}</n-button>
+      </div>
+    </n-alert>
     <n-tabs v-model:value="tab" type="line">
       <n-tab-pane name="users" :tab="t('用户 ({0})', [users.length])">
         <div class="bar">
           <div style="flex: 1" />
           <n-button size="small" type="primary" @click="showCreate = true">{{ t('添加用户') }}</n-button>
         </div>
-        <n-data-table :columns="columns" :data="users" :loading="loading" size="small" :scroll-x="920" />
+        <n-data-table
+          :columns="columns"
+          :data="users"
+          :loading="loading"
+          size="small"
+          :class="{ 'm-table': isMobile }"
+          :scroll-x="isMobile ? undefined : 790"
+          :table-layout="isMobile ? 'fixed' : 'auto'"
+        />
       </n-tab-pane>
 
       <n-tab-pane name="invites" :tab="t('邀请码')">
@@ -382,6 +447,48 @@ async function saveSettings() {
             </div>
           </section>
 
+          <section class="set-group">
+            <h3 class="set-group-title"><n-icon :component="CloudDownloadOutline" />{{ t('版本与更新') }}</h3>
+            <div class="set-card">
+              <div class="set-row">
+                <div class="set-text">
+                  <div class="set-label">{{ t('当前版本') }}</div>
+                  <div class="set-desc">
+                    <template v-if="updateStatus?.buildTime"><span class="mono">{{ versionName(updateStatus.buildTime) }}</span> · {{ t('构建于 {0}', [buildTimeText(updateStatus.buildTime)]) }}</template>
+                    <template v-else>{{ t('开发版（不是从 Docker 镜像运行，没有构建时间，不检查更新）') }}</template>
+                  </div>
+                </div>
+              </div>
+              <div v-if="updateStatus?.buildTime" class="set-row">
+                <div class="set-text">
+                  <div class="set-label">
+                    {{ t('最新版本') }}
+                    <span v-if="updateStatus.hasUpdate" class="update-badge">{{ t('有更新') }}</span>
+                  </div>
+                  <div class="set-desc">
+                    <template v-if="updateStatus.error">{{ t('检查失败：{0}', [updateStatus.error]) }}</template>
+                    <template v-else-if="updateStatus.latestTime"><span class="mono">{{ versionName(updateStatus.latestTime) }}</span> · {{ t('构建于 {0}', [buildTimeText(updateStatus.latestTime)]) }}</template>
+                    <template v-else>{{ t('还没有检查过') }}</template>
+                    <template v-if="updateStatus.checkedAt"> · {{ t('{0}检查', [formatTime(updateStatus.checkedAt)]) }}</template>
+                    <br />{{ updateStatus.image }}:latest
+                  </div>
+                </div>
+                <div class="set-control">
+                  <n-button size="small" :loading="checkingUpdate" @click="checkUpdate">{{ t('检查更新') }}</n-button>
+                </div>
+              </div>
+              <div class="set-row">
+                <div class="set-text">
+                  <div class="set-label">{{ t('自动检查更新') }}</div>
+                  <div class="set-desc">{{ t('管理员打开网页时查询镜像仓库（30 分钟内最多一次），有新版本时提示，只有管理员能看到') }}</div>
+                </div>
+                <div class="set-control">
+                  <n-switch :value="settings.updateCheckEnabled !== 'false'" @update:value="(v: boolean) => (settings.updateCheckEnabled = String(v))" />
+                </div>
+              </div>
+            </div>
+          </section>
+
           <!-- 固定在底部，有改动时提示 -->
           <div class="save-bar" :class="{ dirty }">
             <span class="save-hint">{{ dirty ? t('有未保存的修改') : t('所有修改已保存') }}</span>
@@ -409,6 +516,35 @@ async function saveSettings() {
 </template>
 
 <style scoped>
+.update-alert {
+  margin-bottom: 12px;
+}
+
+.upgrade-cmd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.upgrade-cmd code {
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--app-text) 8%, transparent);
+  word-break: break-all;
+}
+
+.update-badge {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #fff;
+  background: var(--app-accent);
+}
+
 .bar {
   display: flex;
   margin-bottom: 10px;

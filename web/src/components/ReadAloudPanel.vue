@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue'
-import { NIcon, NSelect, NSlider, NDropdown } from 'naive-ui'
+import { NButton, NIcon, NSelect, NSlider, NDropdown } from 'naive-ui'
 import { PlayCircle, PauseCircle, PlaySkipBack, PlaySkipForward, Close, OptionsOutline, TimerOutline } from '@vicons/ionicons5'
 import type { TtsEngine } from '@/api/types'
 import { t } from '@/i18n'
@@ -28,6 +28,8 @@ const emit = defineEmits<{
   'update:engine': [string]
   'update:rate': [number]
   'update:voice': [string]
+  /** 打开朗读引擎管理（新建、编辑、导入在线引擎） */
+  manageEngines: []
 }>()
 
 const showOptions = ref(false)
@@ -96,15 +98,19 @@ onBeforeUnmount(() => sleepTimer && clearInterval(sleepTimer))
       <button class="icon-btn" :title="t('停止朗读')" @click="emit('stop')"><n-icon :component="Close" size="20" /></button>
     </div>
     <div v-if="showOptions" class="options">
-      <label>
+      <!-- 不用 label：label 里点任何地方都会触发其中的第一个按钮（管理引擎） -->
+      <div class="option-row">
         <span>{{ t('引擎') }}</span>
-        <n-select
-          :value="engine"
-          :options="engineOptions"
-          size="small"
-          @update:value="(v: string) => emit('update:engine', v)"
-        />
-      </label>
+        <div class="engine-row">
+          <n-select
+            :value="engine"
+            :options="engineOptions"
+            size="small"
+            @update:value="(v: string) => emit('update:engine', v)"
+          />
+          <n-button size="small" @click="emit('manageEngines')">{{ t('管理引擎') }}</n-button>
+        </div>
+      </div>
       <label v-if="engine === 'browser'">
         <span>{{ t('语音') }}</span>
         <n-select
@@ -126,12 +132,23 @@ onBeforeUnmount(() => sleepTimer && clearInterval(sleepTimer))
           @update:value="(v: number) => emit('update:rate', v)"
         />
       </label>
-      <div class="hint">{{ t('在线朗读引擎可以在“我的 → 朗读引擎”中导入（与阅读 App 的格式相同）') }}</div>
     </div>
   </div>
 </template>
 
 <style scoped>
+.engine-row {
+  display: flex;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.engine-row .n-select {
+  flex: 1;
+  min-width: 0;
+}
+
 .tts-panel {
   position: fixed;
   left: 50%;
@@ -200,14 +217,16 @@ onBeforeUnmount(() => sleepTimer && clearInterval(sleepTimer))
   margin-top: 6px;
 }
 
-.options label {
+.options label,
+.option-row {
   display: flex;
   align-items: center;
   gap: 12px;
   font-size: 13px;
 }
 
-.options label > span {
+.options label > span,
+.option-row > span {
   width: 76px;
   flex-shrink: 0;
   opacity: 0.8;

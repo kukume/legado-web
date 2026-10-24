@@ -218,5 +218,11 @@
   "浏览器调试地址需要以 http:// 或 ws:// 开头": "The browser debugging address must start with http:// or ws://",
   "请填写浏览器调试地址": "Please enter the browser debugging address",
   "连接失败：{0}": "Connection failed: {0}",
-  "没有设置浏览器": "No browser is configured"
+  "没有设置浏览器": "No browser is configured",
+  "请填写名称": "Please enter a name",
+  "请填写 url": "Please enter the url",
+  "Content-Type 不是有效的正则表达式": "Content-Type is not a valid regular expression",
+  "已有同名的朗读引擎": "A TTS engine with this name already exists",
+  "没有编辑朗读引擎的权限（与添加书源的权限相同）": "You don't have permission to edit TTS engines (same as adding sources)",
+  "开发版没有构建时间，无法检查更新": "Development builds have no build time, so updates can't be checked"
 }

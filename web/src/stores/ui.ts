@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import { usePreferredDark } from '@/utils/media'
+import { syncAppThemeColor } from '@/utils/themeColor'
 
 type ThemeMode = 'auto' | 'light' | 'dark'
 
@@ -31,6 +32,7 @@ export const useUiStore = defineStore('ui', () => {
     isDark,
     (d) => {
       document.documentElement.dataset.theme = d ? 'dark' : 'light'
+      syncAppThemeColor()
     },
     { immediate: true },
   )

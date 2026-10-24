@@ -46,7 +46,7 @@ export default defineConfig({
     VitePWA({
       // 有新版本时由页面提示用户刷新，避免阅读中被强制刷新
       registerType: 'prompt',
-      includeAssets: ['favicon.svg', 'favicon.ico', 'apple-touch-icon-180x180.png'],
+      includeAssets: ['favicon.svg', 'favicon.ico', 'apple-touch-icon-180x180.png', 'wakelock.mp4'],
       manifest: {
         name: '阅读 Web',
         short_name: '阅读',
@@ -98,7 +98,7 @@ export default defineConfig({
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
   server: {
-    port: 5173,
+    port: 15173,
     proxy: {
       '/api': { target: api, changeOrigin: true },
       '/openapi': { target: api, changeOrigin: true },

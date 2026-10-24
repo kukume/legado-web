@@ -144,6 +144,22 @@ export interface TtsEngine {
   owned: boolean
 }
 
+/** 在线朗读引擎的完整内容（与阅读 App 的 httpTTS 格式相同） */
+export interface TtsEngineConfig {
+  id?: number
+  name: string
+  url: string
+  contentType?: string | null
+  concurrentRate?: string | null
+  loginUrl?: string | null
+  loginUi?: string | null
+  loginCheckJs?: string | null
+  header?: string | null
+  jsLib?: string | null
+  enabledCookieJar?: boolean | null
+  lastUpdateTime?: number
+}
+
 export interface LocalBookInfo {
   enabled: boolean
   maxMb: number

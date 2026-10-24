@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { goBack } from '@/utils/navigation'
 import { computed, onMounted, ref, watch } from 'vue'
 import { isNetworkError } from '@/api/http'
 import { offlineContentIndexes } from '@/offline/db'
@@ -285,7 +286,7 @@ function onChanged(nb: Book) {
 <template>
   <div class="page">
     <div class="page-header">
-      <n-button quaternary circle @click="router.back()">
+      <n-button quaternary circle @click="goBack(router, { name: 'shelf' })">
         <template #icon><n-icon :component="ArrowBackOutline" /></template>
       </n-button>
       <h2>{{ t('书籍详情') }}</h2>

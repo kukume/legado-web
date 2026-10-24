@@ -428,5 +428,16 @@ export function useReaderTts(d: ReaderTtsDeps) {
 
   onBeforeUnmount(ttsStop)
 
-  return { tts, ttsEngines, ttsVoices, browserTts, ttsEngineName, ttsStart, ttsStartAt, ttsToggle, ttsStop, ttsSkip }
+  /** 朗读引擎有改动后重新加载列表；正在朗读时与切换引擎一样，从当前这句起用新的设置重新读 */
+  async function reloadEngines() {
+    ttsEngines.value = await ttsApi.list().catch(() => ttsEngines.value)
+    if (!tts.active) return
+    const playing = tts.state === "playing"
+    ttsRun++
+    speaker?.stop()
+    speaker = null
+    if (playing) ttsResume()
+  }
+
+  return { tts, ttsEngines, ttsVoices, browserTts, ttsEngineName, ttsStart, ttsStartAt, ttsToggle, ttsStop, ttsSkip, reloadEngines }
 }

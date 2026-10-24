@@ -18,8 +18,10 @@ import io.ktor.server.routing.Route
 import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
+import io.ktor.server.routing.put
 import io.ktor.utils.io.ByteWriteChannel
 import io.ktor.utils.io.writeFully
+import io.legado.app.data.entities.HttpTTS
 import io.legado.web.auth.AUTH_JWT
 import io.legado.web.auth.user
 import io.legado.web.service.AudioService
@@ -29,6 +31,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.Response
 
 data class SpeakRequest(val text: String = "", val speed: Int = 10)
+data class TtsTestRequest(val engine: HttpTTS = HttpTTS(), val text: String = "", val speed: Int = 10)
 
 /** 音频响应只允许媒体类型；直接打开地址时禁止内容在本站执行 */
 private fun safeMediaType(type: String?): ContentType {
@@ -73,7 +76,7 @@ private class UpstreamContent(private val res: Response) : OutgoingContent.Write
 /**
  * - GET  /api/shelf/{id}/audio/{index}/info?refresh=   播放信息（是否为 m3u8）
  * - GET  /api/shelf/{id}/audio/{index}?token=&refresh=  音频（经服务器转发，支持 Range）；m3u8 分片地址带 u、sig
- * - /api/tts/…  在线朗读引擎：列表、导入、导出、删除、合成语音
+ * - /api/tts/…  在线朗读引擎：列表、新建、编辑、导入、导出、删除、试听、合成语音
  */
 fun Route.mediaRoutes(audioService: AudioService, ttsService: TtsService) {
     authenticate(AUTH_JWT) {
@@ -100,6 +103,15 @@ fun Route.mediaRoutes(audioService: AudioService, ttsService: TtsService) {
         get("/api/tts") { call.respond(ttsService.list(call.user)) }
         get("/api/tts/export") { call.respond(ttsService.export(call.user)) }
         post("/api/tts/import") { call.respond(ttsService.import(call.user, call.receiveText())) }
+        get("/api/tts/{id}") { call.respond(ttsService.get(call.user, call.longParam("id"))) }
+        post("/api/tts") { call.respond(ttsService.save(call.user, null, call.receive<HttpTTS>())) }
+        put("/api/tts/{id}") { call.respond(ttsService.save(call.user, call.longParam("id"), call.receive<HttpTTS>())) }
+        post("/api/tts/test") {
+            val req = call.receive<TtsTestRequest>()
+            val audio = ttsService.test(call.user, req.engine, req.text, req.speed)
+            ApplicationCallSecurityHeaders(call)
+            call.respondBytes(audio.bytes, safeMediaType(audio.contentType))
+        }
         delete("/api/tts/{id}") {
             ttsService.delete(call.user, call.longParam("id"))
             call.respond(OkResponse())

@@ -142,6 +142,54 @@ class TtsService(private val sourceService: SourceService) {
         parsed.remove(id)
     }
 
+    /** 自己的引擎的完整内容（编辑用） */
+    suspend fun get(user: UserPrincipal, id: Long): HttpTTS {
+        val row = dbQuery {
+            TtsEngines.selectAll().where { (TtsEngines.id eq id) and (TtsEngines.userId eq user.id) }.firstOrNull()
+        } ?: throw NotFoundException("朗读引擎不存在")
+        return parse(id, row[TtsEngines.json])
+    }
+
+    /** 新建（[id] 为空）或修改自己的引擎；同一用户的引擎不能重名（导入时按名称覆盖） */
+    suspend fun save(user: UserPrincipal, id: Long?, tts: HttpTTS): HttpTTS {
+        if (!sourceService.canAddSource(user)) throw ForbiddenException("没有编辑朗读引擎的权限（与添加书源的权限相同）")
+        val name = tts.name.trim().take(255)
+        if (name.isEmpty()) throw BadRequestException("请填写名称")
+        if (tts.url.isBlank()) throw BadRequestException("请填写 url")
+        tts.contentType?.takeIf { it.isNotBlank() }?.let {
+            runCatching { it.toRegex() }.onFailure { throw BadRequestException("Content-Type 不是有效的正则表达式") }
+        }
+        val savedId = dbQuery {
+            val sameName = TtsEngines.selectAll()
+                .where { (TtsEngines.userId eq user.id) and (TtsEngines.name eq name) }
+                .any { it[TtsEngines.id].value != id }
+            if (sameName) throw BadRequestException("已有同名的朗读引擎")
+            if (id != null) {
+                val n = TtsEngines.update({ (TtsEngines.id eq id) and (TtsEngines.userId eq user.id) }) {
+                    it[TtsEngines.name] = name
+                    it[json] = GSON.toJson(tts.copy(id = id, name = name, lastUpdateTime = System.currentTimeMillis()))
+                }
+                if (n == 0) throw NotFoundException("朗读引擎不存在")
+                id
+            } else {
+                val order = TtsEngines.selectAll().where { TtsEngines.userId eq user.id }.count().toInt()
+                val newId = TtsEngines.insertAndGetId {
+                    it[userId] = user.id
+                    it[TtsEngines.name] = name
+                    it[json] = "{}"
+                    it[TtsEngines.order] = order
+                    it[createdAt] = System.currentTimeMillis()
+                }.value
+                TtsEngines.update({ TtsEngines.id eq newId }) {
+                    it[json] = GSON.toJson(tts.copy(id = newId, name = name, lastUpdateTime = System.currentTimeMillis()))
+                }
+                newId
+            }
+        }
+        parsed.remove(savedId)
+        return get(user, savedId)
+    }
+
     /** 导出自己导入的引擎（App 可以导入） */
     suspend fun export(user: UserPrincipal): List<HttpTTS> = dbQuery {
         TtsEngines.selectAll().where { TtsEngines.userId eq user.id }
@@ -153,11 +201,21 @@ class TtsService(private val sourceService: SourceService) {
      * 合成一段语音。[speed] 与 App 相同：10 为正常语速（界面上的 1.0 倍）。
      * 与 App 相同的检查：返回 JSON / 文本，或与引擎的 contentType 正则不匹配时视为出错，把返回内容作为错误信息。
      */
-    suspend fun speak(user: UserPrincipal, id: Long, text: String, speed: Int): SpeechAudio {
+    suspend fun speak(user: UserPrincipal, id: Long, text: String, speed: Int): SpeechAudio =
+        synthesize(user, usable(user, id), text, speed)
+
+    /** 用还没保存的引擎试听（编辑页）：规则在服务器上执行，需要添加书源的权限 */
+    suspend fun test(user: UserPrincipal, tts: HttpTTS, text: String, speed: Int): SpeechAudio {
+        if (!sourceService.canAddSource(user)) throw ForbiddenException("没有编辑朗读引擎的权限（与添加书源的权限相同）")
+        if (tts.url.isBlank()) throw BadRequestException("请填写 url")
+        // id 为负数：不与已保存的引擎共用 Cookie 等数据
+        return synthesize(user, tts.copy(id = -1), text, speed)
+    }
+
+    private suspend fun synthesize(user: UserPrincipal, tts: HttpTTS, text: String, speed: Int): SpeechAudio {
         val speakText = text.trim()
         if (speakText.isEmpty()) throw BadRequestException("没有要朗读的文字")
         if (speakText.length > MAX_TEXT) throw BadRequestException("单次朗读的文字过长")
-        val tts = usable(user, id)
         // 朗读时不应弹出书源网页
         val ctx = EngineContext(user.id).apply { suppressUi = true }
         return runEngine(user.id, 90_000, ctx = ctx) {

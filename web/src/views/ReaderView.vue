@@ -1,12 +1,14 @@
 <script setup lang="ts">
+import { goBack } from '@/utils/navigation'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NIcon, NSpin, useMessage } from 'naive-ui'
+import { NIcon, NModal, NSpin, useMessage } from 'naive-ui'
 import { ChevronBackOutline, ChevronForwardOutline } from '@vicons/ionicons5'
 import { shelfApi } from '@/api'
 import QuickReplaceModal from '@/components/QuickReplaceModal.vue'
 import DictModal from '@/components/DictModal.vue'
 import ReadAloudPanel from '@/components/ReadAloudPanel.vue'
+import TtsEngineManager from '@/components/TtsEngineManager.vue'
 import ReviewDrawer from '@/components/ReviewDrawer.vue'
 import CustomThemeModal from '@/components/CustomThemeModal.vue'
 import ChangeSourceModal from '@/components/ChangeSourceModal.vue'
@@ -32,6 +34,7 @@ import { useScrollMode } from '@/composables/useScrollMode'
 import { usePagedMode } from '@/composables/usePagedMode'
 import { useTextSelection } from '@/composables/useTextSelection'
 import { useWakeLock } from '@/composables/useWakeLock'
+import { setPageThemeColor } from '@/utils/themeColor'
 import { useAutoRead } from '@/composables/useAutoRead'
 import { useReadingStats } from '@/composables/useReadingStats'
 import { useChapterContent } from '@/composables/useChapterContent'
@@ -243,7 +246,7 @@ const {
 
 // ---------------- 朗读 ----------------
 
-const { tts, ttsEngines, ttsVoices, browserTts, ttsEngineName, ttsStart, ttsStartAt, ttsToggle, ttsStop, ttsSkip } = useReaderTts({
+const { tts, ttsEngines, ttsVoices, browserTts, ttsEngineName, ttsStart, ttsStartAt, ttsToggle, ttsStop, ttsSkip, reloadEngines } = useReaderTts({
   cfg, chapters, curIndex, isPaged, isVertical, pageSeg, segments, pageClip, scroller, columns,
   page, pageCount, pageStarts, pageMetrics, updatePagePos, openPage, openScroll, appendNext,
   onStart: () => (menuVisible.value = false),
@@ -251,6 +254,10 @@ const { tts, ttsEngines, ttsVoices, browserTts, ttsEngineName, ttsStart, ttsStar
 
 // 阅读时屏幕常亮
 useWakeLock(() => cfg.value.keepScreenOn !== false)
+const showTtsEngines = ref(false)
+// 顶部状态栏（添加到主屏幕后打开时）与阅读背景同色
+watch(() => theme.value.bg, (bg) => setPageThemeColor(bg), { immediate: true })
+onBeforeUnmount(() => setPageThemeColor(null))
 
 // ---------------- 通用操作 ----------------
 
@@ -827,7 +834,7 @@ function onChanged(nb: Book) {
       :is-fullscreen="isFullscreen"
       :is-night="cfg.theme === 'night'"
       :theme-bg="theme.bg"
-      @back="router.back()"
+      @back="goBack(router, { name: 'shelf' })"
       @reload="reloadChapter"
       @change-source="showChange = true"
       @info="router.push({ name: 'book', params: { id: bookId } })"
@@ -897,7 +904,19 @@ function onChanged(nb: Book) {
       @update:engine="(v: string) => (readerStore.config.ttsEngine = v)"
       @update:rate="(v: number) => (readerStore.config.ttsRate = v)"
       @update:voice="(v: string) => (readerStore.config.ttsVoice = v)"
+      @manage-engines="showTtsEngines = true"
     />
+    <!-- 朗读引擎管理（与 App 一样从朗读设置进入），关闭后刷新引擎列表 -->
+    <n-modal
+      v-model:show="showTtsEngines"
+      preset="card"
+      :title="t('朗读引擎')"
+      style="width: 640px; max-width: 94vw"
+      :auto-focus="false"
+      @after-leave="reloadEngines"
+    >
+      <tts-engine-manager />
+    </n-modal>
 
     <review-drawer
       v-if="reviewTarget"
@@ -1194,6 +1213,11 @@ function onChanged(nb: Book) {
 
 /* 窄屏不显示纸张效果，正文铺满 */
 @media (max-width: 799px) {
+  /* 窄屏没有纸张外的区域：底色也用正文背景色（iOS 主屏幕应用的状态栏取这个固定元素的颜色） */
+  .reader {
+    background: var(--r-bg);
+  }
+
   .paper {
     max-width: none;
     padding: 0 20px;

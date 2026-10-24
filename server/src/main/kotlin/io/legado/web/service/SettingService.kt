@@ -45,6 +45,8 @@ class SettingService {
         const val REMOTE_BROWSER_ENABLED = "remoteBrowserEnabled"
         /** 浏览器的调试地址（Chrome DevTools Protocol，如 http://browser:9222）：webView 书源和远程浏览器使用，留空时不使用浏览器 */
         const val BROWSER_CDP = "browserCdp"
+        /** 管理员打开网页时检查镜像仓库里是否有新版本（只提示管理员） */
+        const val UPDATE_CHECK_ENABLED = "updateCheckEnabled"
         /** 读取设置时密钥的占位符；保存时收到它表示“不修改” */
         const val SECRET_MASK = "********"
         private val secretKeys = setOf(CAP_SECRET)
@@ -65,6 +67,7 @@ class SettingService {
             PRIVATE_NETWORK_ALLOWLIST to "",
             REMOTE_BROWSER_ENABLED to "false",
             BROWSER_CDP to "",
+            UPDATE_CHECK_ENABLED to "true",
         )
     }
 

@@ -1,7 +1,7 @@
 import { ApiError, getToken, http, NetworkError, streamNdjson } from './http'
 import { locale } from '@/i18n'
 import type {
-  Book, BookGroup, Bookmark, BookSearchResult, ReadingSummary, LocalBookInfo, TtsEngine, Chapter, ChapterContent, ExploreKind, ImportResult, Invite, LoginConfig,
+  Book, BookGroup, Bookmark, BookSearchResult, ReadingSummary, LocalBookInfo, TtsEngine, TtsEngineConfig, Chapter, ChapterContent, ExploreKind, ImportResult, Invite, LoginConfig,
   LoginV2Render, Me, PublicConfig, ReplaceRule, SearchBook, SourceSummary, Subscription, User,
   DictRule, TxtTocRule,
 } from './types'
@@ -31,6 +31,17 @@ export const inviteApi = {
   remove: (id: number) => http.del(`/api/invites/${id}`),
 }
 
+/** 检查更新：时间都是镜像的构建时间（秒），本地开发运行时 buildTime 为 null */
+export interface UpdateStatus {
+  buildTime: number | null
+  image: string
+  latestTime: number | null
+  checkedAt: number | null
+  error: string | null
+  hasUpdate: boolean
+  enabled: boolean
+}
+
 export const adminApi = {
   users: () => http.get<User[]>('/api/admin/users'),
   createUser: (username: string, password: string) =>
@@ -42,6 +53,10 @@ export const adminApi = {
   saveSettings: (s: Record<string, string>) => http.put<Record<string, string>>('/api/admin/settings', s),
   /** 测试浏览器调试地址，返回浏览器版本 */
   testBrowser: (cdp: string) => http.post<{ browser: string; userAgent: string }>('/api/admin/browser/test', { cdp }),
+  /** 当前版本（构建时间）与最近一次检查更新的结果 */
+  /** auto 为 true 时（管理员打开网页）服务端按需检查一次 */
+  update: (auto = false) => http.get<UpdateStatus>(`/api/admin/update${auto ? '?auto=true' : ''}`),
+  checkUpdate: () => http.post<UpdateStatus>('/api/admin/update/check'),
 }
 
 export interface SourceDetail {
@@ -366,31 +381,40 @@ export const ttsApi = {
   import: (text: string) => http.postRaw<{ added: number; updated: number }>('/api/tts/import', text),
   export: () => http.get<unknown[]>('/api/tts/export'),
   remove: (id: number) => http.del(`/api/tts/${id}`),
+  get: (id: number) => http.get<TtsEngineConfig>(`/api/tts/${id}`),
+  /** 新建（没有 id）或修改 */
+  save: (e: TtsEngineConfig) => (e.id ? http.put<TtsEngineConfig>(`/api/tts/${e.id}`, e) : http.post<TtsEngineConfig>('/api/tts', e)),
   /** 合成一段语音，返回音频 */
-  speak: async (id: number, text: string, speed: number, signal?: AbortSignal): Promise<Blob> => {
-    let res: Response
+  speak: (id: number, text: string, speed: number, signal?: AbortSignal) =>
+    ttsAudio(`/api/tts/${id}/speak`, { text, speed }, signal),
+  /** 用编辑中（还没保存）的引擎试听 */
+  test: (engine: TtsEngineConfig, text: string, speed = 10) => ttsAudio('/api/tts/test', { engine, text, speed }),
+}
+
+/** 请求朗读引擎合成语音，返回音频；出错时把服务器的错误信息作为异常 */
+async function ttsAudio(url: string, body: unknown, signal?: AbortSignal): Promise<Blob> {
+  let res: Response
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${getToken()}`, 'Accept-Language': locale, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal,
+    })
+  } catch (e: any) {
+    if (e?.name === 'AbortError') throw e
+    throw new NetworkError()
+  }
+  if (!res.ok) {
+    let msg = t('朗读失败（{0}）', [res.status])
     try {
-      res = await fetch(`/api/tts/${id}/speak`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${getToken()}`, 'Accept-Language': locale, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, speed }),
-        signal,
-      })
-    } catch (e: any) {
-      if (e?.name === 'AbortError') throw e
-      throw new NetworkError()
+      msg = (await res.json()).error || msg
+    } catch {
+      /* ignore */
     }
-    if (!res.ok) {
-      let msg = t('朗读失败（{0}）', [res.status])
-      try {
-        msg = (await res.json()).error || msg
-      } catch {
-        /* ignore */
-      }
-      throw new ApiError(res.status, msg)
-    }
-    return res.blob()
-  },
+    throw new ApiError(res.status, msg)
+  }
+  return res.blob()
 }
 
 export const backupApi = {

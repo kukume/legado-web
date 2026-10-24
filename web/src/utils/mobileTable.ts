@@ -19,10 +19,14 @@ export function mobileColumns<T>(o: {
   sub?: (row: T) => VNodeChild
   enabled: (row: T) => boolean
   onToggle: (row: T, value: boolean) => void
+  /** 开关不可操作的行（如自己的账号） */
+  disabled?: (row: T) => boolean
   actions: (row: T) => RowAction[]
+  /** 是否有多选列，默认有 */
+  selectable?: boolean
 }): DataTableColumns<T> {
   return [
-    { type: 'selection', width: 36 },
+    ...(o.selectable === false ? [] : [{ type: 'selection', width: 36 } as const]),
     {
       key: 'name',
       title: '',
@@ -36,7 +40,8 @@ export function mobileColumns<T>(o: {
       key: 'enabled',
       title: '',
       width: 52,
-      render: (row) => h(NSwitch, { size: 'small', value: o.enabled(row), onUpdateValue: (v: boolean) => o.onToggle(row, v) }),
+      render: (row) =>
+        h(NSwitch, { size: 'small', value: o.enabled(row), disabled: o.disabled?.(row), onUpdateValue: (v: boolean) => o.onToggle(row, v) }),
     },
     {
       key: 'more',

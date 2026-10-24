@@ -18,6 +18,8 @@ const newName = ref('')
 const createdKey = ref<string | null>(null)
 
 const docsUrl = `${location.origin}/openapi/docs`
+/** IDE 插件（VS Code、JetBrains），通过开放接口读书 */
+const PLUGINS_URL = 'https://github.com/kukume/legado-plugins'
 
 async function load() {
   loading.value = true
@@ -89,6 +91,9 @@ const columns: DataTableColumns<ApiKeyInfo> = [
 
     <p class="small" style="margin: 12px 0 0">
       {{ t('接口文档（Swagger，可直接调试）：') }}<a :href="docsUrl" target="_blank" rel="noopener">{{ docsUrl }}</a>
+    </p>
+    <p class="small" style="margin: 6px 0 0">
+      {{ t('在 IDE 里看书：安装 VS Code / JetBrains 插件，填入本站地址和 API Key：') }}<a :href="PLUGINS_URL" target="_blank" rel="noopener">{{ PLUGINS_URL }}</a>
     </p>
 
     <n-modal v-model:show="showCreate" preset="card" :title="t('生成 API Key')" style="max-width: 420px">

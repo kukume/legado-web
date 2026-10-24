@@ -27,6 +27,12 @@ WORKDIR /app
 COPY --from=server /src/server/build/libs/legado-web.jar /app/legado-web.jar
 ENV LEGADO_DATA_DIR=/data \
     PORT=8080
+# 检查更新用：构建时间（GitHub Actions 传入的 SOURCE_DATE_EPOCH，与镜像的 created 相同）和镜像名。
+# 本地构建不传时为空，服务显示为开发版，不检查更新
+ARG SOURCE_DATE_EPOCH
+ARG LEGADO_IMAGE
+ENV LEGADO_BUILD_TIME=${SOURCE_DATE_EPOCH} \
+    LEGADO_IMAGE=${LEGADO_IMAGE}
 VOLUME /data
 EXPOSE 8080
 ENTRYPOINT ["java", "-Xmx512m", "-jar", "/app/legado-web.jar"]

@@ -54,7 +54,13 @@ private fun serverInfo() = mapOf(
     "browserAvailable" to (io.legado.app.help.engine.Engine.webViewProvider != null).toString(),
 )
 
-fun Route.authRoutes(userService: UserService, jwt: JwtService, settings: SettingService, captcha: CaptchaService) {
+fun Route.authRoutes(
+    userService: UserService,
+    jwt: JwtService,
+    settings: SettingService,
+    captcha: CaptchaService,
+    updates: io.legado.web.service.UpdateService,
+) {
     route("/api/auth") {
         get("/config") {
             call.respond(
@@ -150,6 +156,21 @@ fun Route.authRoutes(userService: UserService, jwt: JwtService, settings: Settin
                 call.requireAdmin()
                 settings.update(call.receive<Map<String, String>>())
                 call.respond(settings.all() + serverInfo())
+            }
+            /** 当前版本（构建时间）和检查更新的结果；?auto=true 时（管理员打开网页）按需检查一次 */
+            get("/update") {
+                call.requireAdmin()
+                if (call.request.queryParameters["auto"] == "true") {
+                    call.respond(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { updates.checkIfStale() })
+                } else {
+                    call.respond(updates.status())
+                }
+            }
+            /** 立即检查更新 */
+            post("/update/check") {
+                call.requireAdmin()
+                if (updates.buildTime == null) throw io.legado.web.auth.BadRequestException("开发版没有构建时间，无法检查更新")
+                call.respond(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { updates.check() })
             }
             /** 测试浏览器调试地址：能连上时返回浏览器版本 */
             post("/browser/test") {

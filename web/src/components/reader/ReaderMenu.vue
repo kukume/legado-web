@@ -200,4 +200,14 @@ defineEmits<{
   transform: translateY(100%);
   opacity: 0;
 }
+
+/*
+ * iOS（添加到主屏幕后打开）的状态栏取顶部固定元素的颜色，顶栏消失后不会再变回来，会一直是菜单的颜色。
+ * 手机上收起菜单时，顶栏先换成正文背景色再滑出，状态栏最后取到的是正文背景色
+ */
+@media (max-width: 799px) {
+  .topbar.slide-down-leave-active {
+    background: var(--r-bg);
+  }
+}
 </style>
