@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { goBack } from '@/utils/navigation'
+import { useIsMobile } from '@/composables/useIsMobile'
 import { computed, onMounted, ref, watch } from 'vue'
 import { isNetworkError } from '@/api/http'
 import { offlineContentIndexes } from '@/offline/db'
@@ -21,6 +22,7 @@ import { t } from '@/i18n'
 import { isPdfBook } from '@/utils/pdf'
 
 const route = useRoute()
+const isMobile = useIsMobile()
 const router = useRouter()
 const message = useMessage()
 const dialog = useDialog()
@@ -314,14 +316,17 @@ function onChanged(nb: Book) {
     </div>
 
     <div v-if="loading && !book" class="card head">
-      <n-skeleton :width="120" :height="160" />
-      <div style="flex: 1"><n-skeleton text :repeat="4" /></div>
+      <div class="head-main">
+        <n-skeleton :width="isMobile ? 92 : 120" :height="isMobile ? 123 : 160" />
+        <div style="flex: 1"><n-skeleton text :repeat="4" /></div>
+      </div>
     </div>
 
     <template v-if="book">
       <div class="card head">
+        <div class="head-main">
         <button class="cover-btn" :title="t('换封面')" @click="openCover('direct')">
-          <book-cover :url="book.customCoverUrl || book.coverUrl" :name="book.name" :author="book.author" :origin="book.origin" :width="120" />
+          <book-cover :url="book.customCoverUrl || book.coverUrl" :name="book.name" :author="book.author" :origin="book.origin" :width="isMobile ? 92 : 120" />
         </button>
         <div class="info">
           <h1>{{ book.name }}</h1>
@@ -341,26 +346,28 @@ function onChanged(nb: Book) {
           <div class="muted small">
             {{ t('共 {0} {1}', [book.totalChapterNum, book.isAudio || book.isVideo ? t('集') : t('章')]) }}<template v-if="!book.isAudio && !book.isVideo"><template v-if="!book.isLocal"> {{ t('· 服务器已缓存 {0} 章', [cachedCount]) }}</template> {{ t('· 本机已下载 {0} 章', [offlineCount]) }}</template>
           </div>
+        </div>
+        </div>
           <div v-if="task?.running" class="offline-task">
             <n-progress type="line" :percentage="task.total ? Math.round((task.done / task.total) * 100) : 100" :height="6" style="flex: 1" />
             <span class="muted small">{{ t('离线下载 {0}/{1}', [task.done, task.total]) }}</span>
             <n-button size="tiny" quaternary @click="offline.cancel(book.id)">{{ t('取消') }}</n-button>
           </div>
-          <n-alert v-if="offlineMode" type="info" :bordered="false" style="margin-top: 10px">
+          <n-alert v-if="offlineMode" type="info" :bordered="false">
             {{ t('当前离线，显示的是本机保存的数据，只能阅读已下载的章节') }}
           </n-alert>
-          <n-space style="margin-top: 10px">
-            <n-button type="primary" @click="read()">
+          <div class="actions">
+            <n-button type="primary" class="read-btn" @click="read()">
               <template #icon><n-icon :component="BookOutline" /></template>
               {{ readLabel }}
             </n-button>
-            <n-button :disabled="offlineMode" @click="toggleShelf">{{ book.inShelf ? t('移出书架') : t('加入书架') }}</n-button>
+            <n-button class="act" :disabled="offlineMode" @click="toggleShelf">{{ book.inShelf ? t('移出书架') : t('加入书架') }}</n-button>
             <n-dropdown v-if="!book.isAudio && !book.isVideo && !book.isImage" :options="offlineOptions" :disabled="offlineMode || task?.running" @select="onOffline">
-              <n-button :disabled="offlineMode" :loading="task?.running">
+              <n-button class="act" :disabled="offlineMode" :loading="task?.running">
                 {{ offlineCount && offlineCount >= readableCount ? t('已离线') : t('离线下载') }}
               </n-button>
             </n-dropdown>
-            <n-button-group>
+            <n-button-group class="act">
               <n-button v-if="!book.isLocal" :disabled="offlineMode" @click="showChange = true">{{ t('换源') }}</n-button>
               <n-button v-if="!isPdf" :disabled="offlineMode" :loading="refreshing" @click="refresh(false)">{{ book.isLocal ? t('重新解析目录') : t('更新目录') }}</n-button>
             </n-button-group>
@@ -369,11 +376,10 @@ function onChanged(nb: Book) {
                 <template #icon><n-icon :component="EllipsisHorizontal" /></template>
               </n-button>
             </n-dropdown>
-          </n-space>
-          <div v-if="book.durChapterTitle" class="muted small" style="margin-top: 8px">
+          </div>
+          <div v-if="book.durChapterTitle" class="muted small last-read ellipsis">
             {{ book.isVideo ? t('上次看到') : book.isAudio ? t('上次听到') : t('上次读到') }}：{{ book.durChapterTitle }}
           </div>
-        </div>
       </div>
 
       <div class="card section">
@@ -462,9 +468,17 @@ function onChanged(nb: Book) {
 
 .head {
   display: flex;
-  gap: 20px;
+  flex-direction: column;
+  gap: 14px;
   padding: 20px;
   margin-bottom: 16px;
+}
+
+/* 封面和书名等信息并排，封面顶部对齐 */
+.head-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
 }
 
 .info {
@@ -473,6 +487,18 @@ function onChanged(nb: Book) {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+/* 操作按钮在封面和信息下方，占满整行 */
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.last-read {
+  margin-top: -6px;
 }
 
 .info h1 {
@@ -578,7 +604,29 @@ function onChanged(nb: Book) {
 @media (max-width: 767px) {
   .head {
     padding: 14px;
+    gap: 12px;
+  }
+
+  .head-main {
     gap: 14px;
+  }
+
+  .info h1 {
+    font-size: 19px;
+  }
+
+  /* 手机上“继续阅读”单独占一行，其余按钮在下面一行 */
+  .read-btn {
+    flex: 1 0 100%;
+  }
+
+  /* 其余按钮按行等分宽度 */
+  .act {
+    flex: 1 1 0;
+  }
+
+  .act :deep(.n-button) {
+    flex: 1;
   }
 
   .toc {

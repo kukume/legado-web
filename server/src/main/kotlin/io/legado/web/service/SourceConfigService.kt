@@ -129,9 +129,12 @@ class SourceConfigService(private val sourceService: SourceService) {
 
     // ---------------- 登录界面 ----------------
 
+    /** 书源登录、变量设置用的执行上下文：没有远程浏览器时允许下载网页交给前端显示 */
+    private fun loginContext(user: UserPrincipal) = EngineContext(user.id).apply { allowPageFallback = true }
+
     suspend fun loginConfig(user: UserPrincipal, sourceId: Long): LoginConfig {
         val src = sourceService.get(user, sourceId).source
-        return runEngine(user.id, 60_000) {
+        return runEngine(user.id, 60_000, ctx = loginContext(user)) {
             val loginUrl = src.loginUrl
             val loginInfo = src.getLoginInfoMap() ?: emptyMap()
             val mode = when {
@@ -188,7 +191,7 @@ class SourceConfigService(private val sourceService: SourceService) {
      */
     suspend fun login(user: UserPrincipal, sourceId: Long, info: Map<String, String>): ActionResult {
         val src = sourceService.get(user, sourceId).source
-        val ctx = EngineContext(user.id)
+        val ctx = loginContext(user)
         val r = runEngine(user.id, 120_000, ctx = ctx) {
             if (info.isEmpty()) {
                 src.removeLoginInfo()
@@ -243,7 +246,7 @@ class SourceConfigService(private val sourceService: SourceService) {
     ): ActionResult {
         val src = sourceService.get(user, sourceId).source
         if (action.isAbsUrl()) return ActionResult(true, null, action, openUrls = listOf(action))
-        val ctx = EngineContext(user.id)
+        val ctx = loginContext(user)
         val r = runEngine(user.id, 120_000, ctx = ctx) {
             try {
                 val loginJs = src.getLoginJs() ?: ""
@@ -343,7 +346,7 @@ class SourceConfigService(private val sourceService: SourceService) {
     /** v2：渲染界面 */
     suspend fun loginV2Render(user: UserPrincipal, sourceId: Long, state: String?): LoginV2Render {
         val src = sourceService.get(user, sourceId).source
-        return runEngine(user.id, 60_000) { renderV2(src, state?.ifBlank { null } ?: "{}") }
+        return runEngine(user.id, 60_000, ctx = loginContext(user)) { renderV2(src, state?.ifBlank { null } ?: "{}") }
     }
 
     private suspend fun renderV2(src: BaseSource, state: String): LoginV2Render {
@@ -361,7 +364,7 @@ class SourceConfigService(private val sourceService: SourceService) {
         form: Map<String, String>,
     ): LoginV2ActionResult {
         val src = sourceService.get(user, sourceId).source
-        val ctx = EngineContext(user.id)
+        val ctx = loginContext(user)
         val stateJson = state?.ifBlank { null } ?: "{}"
         return runEngine(user.id, 120_000, ctx = ctx) {
             val raw = try {
@@ -391,7 +394,7 @@ class SourceConfigService(private val sourceService: SourceService) {
 
     suspend fun logout(user: UserPrincipal, sourceId: Long) {
         val src = sourceService.get(user, sourceId).source
-        runEngine(user.id) {
+        runEngine(user.id, ctx = loginContext(user)) {
             src.removeLoginInfo()
             src.removeLoginHeader()
         }
@@ -399,7 +402,7 @@ class SourceConfigService(private val sourceService: SourceService) {
 
     suspend fun setVariable(user: UserPrincipal, sourceId: Long, variable: String?) {
         val src = sourceService.get(user, sourceId).source
-        runEngine(user.id) { src.setVariable(variable?.ifEmpty { null }) }
+        runEngine(user.id, ctx = loginContext(user)) { src.setVariable(variable?.ifEmpty { null }) }
     }
 
     // ---------------- 发现页 ----------------

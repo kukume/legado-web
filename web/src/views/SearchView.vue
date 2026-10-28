@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, shallowRef, triggerRef } from 'vue'
+import { computed, onActivated, onMounted, ref, shallowRef, triggerRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NEmpty, NIcon, NInput, NInputGroup, NProgress, NSelect, NSwitch, NModal, useMessage } from 'naive-ui'
 import { SearchOutline, StopCircleOutline } from '@vicons/ionicons5'
@@ -63,13 +63,27 @@ const list = computed(() => {
   return arr.sort((a, b) => score(b) - score(a) || a.respondTime - b.respondTime)
 })
 
+/** 获取书源和分组；选过的书源已被删除或停用、分组已不存在时回到全部书源 */
+async function reloadSources() {
+  ;[groups.value, sources.value] = await Promise.all([sourceApi.groups(), sourceApi.list()])
+  const v = ui.searchGroup || ''
+  if (v.startsWith('s:') && !sources.value.some((x) => x.enabled && `s:${x.id}` === v)) ui.searchGroup = ''
+  if (v.startsWith('g:') && !groups.value.includes(v.slice(2))) ui.searchGroup = ''
+}
+
+// 页面被缓存：回到搜索页时更新书源列表（例如刚删除、导入或启用了书源）
+let mounted = false
+onActivated(() => {
+  if (!mounted) {
+    mounted = true
+    return
+  }
+  reloadSources().catch(() => {})
+})
+
 onMounted(async () => {
   try {
-    ;[groups.value, sources.value] = await Promise.all([sourceApi.groups(), sourceApi.list()])
-    // 选过的书源已被删除或停用：回到全部书源
-    const v = ui.searchGroup || ''
-    if (v.startsWith('s:') && !sources.value.some((x) => x.enabled && `s:${x.id}` === v)) ui.searchGroup = ''
-    if (v.startsWith('g:') && !groups.value.includes(v.slice(2))) ui.searchGroup = ''
+    await reloadSources()
   } catch {
     /* ignore */
   }

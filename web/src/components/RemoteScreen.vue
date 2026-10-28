@@ -29,12 +29,15 @@ const touch = typeof window !== 'undefined' && matchMedia('(pointer: coarse)').m
 
 let es: EventSource | null = null
 
+/** 屏幕像素密度（1–3）：服务器按它渲染，高分屏上画面不模糊 */
+const screenDpr = () => Math.round(Math.min(3, Math.max(1, window.devicePixelRatio || 1)) * 100) / 100
+
 function connect() {
   const el = stage.value
   const w = Math.round(el?.clientWidth || 400)
   const h = Math.round(el?.clientHeight || 600)
   // 网页视口跟着画面区域的大小
-  const q = new URLSearchParams({ token: getToken(), w: String(w), h: String(h) })
+  const q = new URLSearchParams({ token: getToken(), w: String(w), h: String(h), dpr: String(screenDpr()) })
   es = new EventSource(`/api/browser/${encodeURIComponent(props.token)}/screen?${q}`)
   es.addEventListener('frame', (e) => {
     try {
@@ -73,10 +76,10 @@ const ro = typeof ResizeObserver !== 'undefined'
       resizeTimer = setTimeout(() => {
         const el = stage.value
         if (!el || !el.clientWidth || !el.clientHeight) return
-        const size = `${el.clientWidth}x${el.clientHeight}`
+        const size = `${el.clientWidth}x${el.clientHeight}@${screenDpr()}`
         if (size === lastSize) return
         lastSize = size
-        send({ type: 'resize', width: el.clientWidth, height: el.clientHeight })
+        send({ type: 'resize', width: el.clientWidth, height: el.clientHeight, dpr: screenDpr() })
       }, 300)
     })
   : null
@@ -85,7 +88,7 @@ onMounted(() =>
   nextTick(() => {
     connect()
     if (stage.value) {
-      lastSize = `${stage.value.clientWidth}x${stage.value.clientHeight}`
+      lastSize = `${stage.value.clientWidth}x${stage.value.clientHeight}@${screenDpr()}`
       ro?.observe(stage.value)
     }
   }),

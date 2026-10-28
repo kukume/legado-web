@@ -37,6 +37,10 @@ fun Route.ruleRoutes(dictService: DictRuleService, tocService: TxtTocRuleService
                 dictService.delete(call.user.id, call.receive<NamesRequest>().names)
                 call.respond(OkResponse())
             }
+            post("/order") {
+                dictService.saveOrder(call.user.id, call.receive<NamesRequest>().names)
+                call.respond(OkResponse())
+            }
             post("/import") { call.respond(CountResponse(dictService.import(call.user, call.receiveText()))) }
             post("/defaults") {
                 dictService.importDefaults(call.user.id)

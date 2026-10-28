@@ -133,6 +133,13 @@ class DictRuleService(private val sourceService: SourceService) {
         if (names.isNotEmpty()) DictRules.deleteWhere { (DictRules.userId eq userId) and (DictRules.name inList names) }
     }
 
+    /** 拖动排序：按 [names] 的顺序写入 sortNumber（只改自己的规则；没有编辑权限也可以排序） */
+    suspend fun saveOrder(userId: Long, names: List<String>) = dbQuery {
+        names.forEachIndexed { i, name ->
+            DictRules.update({ (DictRules.userId eq userId) and (DictRules.name eq name) }) { it[sortNumber] = i }
+        }
+    }
+
     /** 导入 App 格式的字典规则 JSON（按名称覆盖） */
     suspend fun import(user: UserPrincipal, json: String): Int {
         requireEdit(user)

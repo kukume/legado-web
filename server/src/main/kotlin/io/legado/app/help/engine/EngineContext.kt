@@ -43,6 +43,13 @@ class EngineContext(
     @Volatile
     var suppressUi: Boolean = false
 
+    /**
+     * 没有远程浏览器时，书源要打开网页让用户操作，是否改为由服务器下载网页、交给前端显示。
+     * 只在书源的登录、变量设置中开启；搜索、发现、阅读等其他地方只提示“需要远程浏览器”，不打开网页
+     */
+    @Volatile
+    var allowPageFallback: Boolean = false
+
     /** 发起请求的浏览器标签页（弹窗优先只显示在这个标签页） */
     @Volatile
     var clientId: String? = null

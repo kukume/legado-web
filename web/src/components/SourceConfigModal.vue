@@ -23,7 +23,6 @@ const config = ref<LoginConfig | null>(null)
 const form = reactive<Record<string, string>>({})
 const variable = ref('')
 const tab = ref('login')
-const actionResult = ref('')
 const running = ref<string | null>(null)
 
 // v2 状态
@@ -41,7 +40,6 @@ async function load() {
   loading.value = true
   config.value = null
   v2.value = null
-  actionResult.value = ''
   effects.openLinks.value = []
   resetForm()
   try {
@@ -138,12 +136,8 @@ async function runV1Action(row: RowUi, isLongClick = false) {
   try {
     const r = await sourceApi.action(props.sourceId, row.action, v1Data(), isLongClick)
     await applyV1(r)
+    // 与 App 相同：按钮函数的返回值不使用（提示由 java.toast 给出，打开网页用 java.openUrl / startBrowser）
     if (!r.ok) return message.error(r.message || t('执行失败'))
-    if (r.result && /^https?:\/\//.test(r.result) && !r.openUrls?.includes(r.result)) {
-      window.open(r.result, '_blank', 'noopener')
-    } else if (r.result) {
-      actionResult.value = r.result
-    }
   } catch (e: any) {
     message.error(e.message)
   } finally {
@@ -395,7 +389,6 @@ async function saveVariable() {
                 >{{ label(row) }}</n-button>
               </template>
             </div>
-            <pre v-if="actionResult" class="result mono">{{ actionResult }}</pre>
             <n-space v-if="showLoginButton" justify="end" style="margin-top: 12px">
               <n-button type="primary" :loading="saving" @click="doLogin">{{ t('登录') }}</n-button>
             </n-space>
@@ -532,17 +525,6 @@ async function saveVariable() {
 .err {
   font-size: 12px;
   color: #d03050;
-}
-
-.result {
-  background: rgba(128, 128, 128, 0.1);
-  padding: 8px;
-  border-radius: 6px;
-  font-size: 12px;
-  white-space: pre-wrap;
-  max-height: 200px;
-  overflow: auto;
-  margin-top: 10px;
 }
 
 .comment {

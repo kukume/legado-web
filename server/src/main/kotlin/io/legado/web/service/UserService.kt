@@ -268,16 +268,9 @@ class UserService(private val settings: SettingService) {
         maxUses: Int,
         expireDays: Int?,
         note: String?,
-        isAdmin: Boolean,
     ): List<InviteDto> {
         val n = count.coerceIn(1, 100)
-        if (!isAdmin) {
-            if (!settings.getBool(SettingService.ALLOW_USER_INVITE)) throw ForbiddenException("未开放用户邀请")
-            val limit = settings.getInt(SettingService.USER_INVITE_LIMIT)
-            val existing = dbQuery { InviteCodes.selectAll().where { InviteCodes.createdBy eq creatorId }.count() }
-            if (existing + n > limit) throw BadRequestException("最多只能生成 $limit 个邀请码")
-        }
-        val uses = if (isAdmin) maxUses.coerceIn(0, 10000) else 1
+        val uses = maxUses.coerceIn(0, 10000)
         val now = System.currentTimeMillis()
         dbQuery {
             repeat(n) {
@@ -294,20 +287,16 @@ class UserService(private val settings: SettingService) {
         return listInvites(creatorId).take(n)
     }
 
-    suspend fun updateInvite(operator: Long, isAdmin: Boolean, id: Long, disabled: Boolean) {
+    suspend fun updateInvite(id: Long, disabled: Boolean) {
         dbQuery {
-            val row = InviteCodes.selectAll().where { InviteCodes.id eq id }.firstOrNull()
-                ?: throw NotFoundException()
-            if (!isAdmin && row[InviteCodes.createdBy] != operator) throw ForbiddenException()
+            InviteCodes.selectAll().where { InviteCodes.id eq id }.firstOrNull() ?: throw NotFoundException()
             InviteCodes.update({ InviteCodes.id eq id }) { it[InviteCodes.disabled] = disabled }
         }
     }
 
-    suspend fun deleteInvite(operator: Long, isAdmin: Boolean, id: Long) {
+    suspend fun deleteInvite(id: Long) {
         dbQuery {
-            val row = InviteCodes.selectAll().where { InviteCodes.id eq id }.firstOrNull()
-                ?: throw NotFoundException()
-            if (!isAdmin && row[InviteCodes.createdBy] != operator) throw ForbiddenException()
+            InviteCodes.selectAll().where { InviteCodes.id eq id }.firstOrNull() ?: throw NotFoundException()
             InviteCodes.deleteWhere { InviteCodes.id eq id }
         }
     }

@@ -123,6 +123,11 @@ class LocalBookService(
                 PdfParser.looksLikePdf(upload) -> "pdf"
                 MobiParser.looksLikeMobi(upload) -> if (ext in MOBI_EXT) ext else "mobi"
                 UmdParser.looksLikeUmd(upload) -> "umd"
+                // zip 但不是 EPUB（没有 mimetype）：普通压缩包、Office 文档、漫画包等
+                EpubParser.isZip(upload) -> throw BadRequestException(
+                    if (ext == "epub") "不是有效的 EPUB 文件（缺少 mimetype）"
+                    else "这是 zip 压缩包，不是电子书（只支持 EPUB、TXT、MOBI、AZW3、AZW、UMD、PDF）"
+                )
                 ext == "epub" || ext == "pdf" || ext == "umd" || ext in MOBI_EXT ->
                     throw BadRequestException("不是有效的 ${ext.uppercase()} 文件（文件头不正确）")
                 ext == "txt" || ext.isEmpty() -> "txt"

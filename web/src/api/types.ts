@@ -15,7 +15,6 @@ export interface User {
 export interface Me {
   user: User
   canAddSource: boolean
-  canInvite: boolean
 }
 
 export interface PublicConfig {

@@ -56,12 +56,23 @@ class EpubParser(file: File) : Closeable {
             "webp" to "image/webp", "bmp" to "image/bmp", "svg" to "image/svg+xml",
         )
 
-        /** 只检查文件特征（上传时先于完整解析） */
-        fun looksLikeEpub(file: File): Boolean {
+        /** zip 文件头（PK） */
+        fun isZip(file: File): Boolean {
             val head = ByteArray(4)
             file.inputStream().use { if (it.read(head) != 4) return false }
             return head[0] == 'P'.code.toByte() && head[1] == 'K'.code.toByte() && head[2] == 3.toByte() && head[3] == 4.toByte()
         }
+
+        /**
+         * 只检查文件特征（上传时先于完整解析）：zip，且其中的 mimetype 为 application/epub+zip。
+         * 普通 zip（.zip、.docx、.cbz 等）返回 false，由调用方提示“不是电子书”
+         */
+        fun looksLikeEpub(file: File): Boolean = isZip(file) && runCatching {
+            ZipFile(file).use { zip ->
+                val entry = zip.getEntry("mimetype") ?: return@use false
+                zip.getInputStream(entry).use { String(it.readNBytes(64), Charsets.US_ASCII).trim() } == "application/epub+zip"
+            }
+        }.getOrDefault(false)
 
         /** zip 内路径规范化：解析 . 和 ..，越界时返回 null */
         fun normalize(base: String, href: String): String? {

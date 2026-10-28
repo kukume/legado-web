@@ -135,6 +135,12 @@ class LocalBookParserTest {
         val fake = tmp(".epub").apply { writeText("<html>not epub</html>") }
         assertFalse(EpubParser.looksLikeEpub(fake))
         assertFailsWith<LocalBookException> { EpubParser(fake) }
+        // 识别阶段：带 mimetype 的才算 EPUB，普通 zip 只是 zip
+        assertTrue(EpubParser.looksLikeEpub(epub3()))
+        val plainZip = epub(mapOf("readme.txt" to "hello".toByteArray()), mimetype = null)
+        assertTrue(EpubParser.isZip(plainZip))
+        assertFalse(EpubParser.looksLikeEpub(plainZip))
+        assertFalse(EpubParser.looksLikeEpub(epub(mapOf("a.txt" to "x".toByteArray()), mimetype = "application/zip")))
         // zip 但没有 mimetype
         assertFailsWith<LocalBookException> { EpubParser(epub(mapOf("META-INF/container.xml" to container.toByteArray()), mimetype = null)) }
         // 压缩炸弹：高度可压缩的大文件
@@ -194,5 +200,15 @@ class LocalBookParserTest {
         assertFailsWith<LocalBookException> { TxtParser.detectCharset(tmp(".txt").apply { writeBytes(png + ByteArray(100)) }) }
         assertFailsWith<LocalBookException> { TxtParser.detectCharset(tmp(".txt").apply { writeBytes("abc".toByteArray() + ByteArray(10) + "def".toByteArray()) }) }
         assertFailsWith<LocalBookException> { TxtParser.detectCharset(tmp(".txt")) }
+        // 不含 \0、但控制字符很多的二进制内容
+        val controls = ByteArray(4000) { i -> if (i % 5 == 0) 0x01 else ('a'.code + i % 26).toByte() }
+        assertFailsWith<LocalBookException> { TxtParser.detectCharset(tmp(".txt").apply { writeBytes(controls) }) }
+        // UTF-8 和 GB18030 都解不通的字节（0xFF 在 GB18030 里不能出现）
+        val garbage = ByteArray(3000) { i -> if (i % 3 == 0) 0xFF.toByte() else ('A'.code + i % 20).toByte() }
+        assertFailsWith<LocalBookException> { TxtParser.detectCharset(tmp(".txt").apply { writeBytes(garbage) }) }
+        // 正常文本里的制表符、换页、Windows 换行不会被误判
+        val normal = "第一章\t开始\r\n正文内容。\u000C\r\n第二章\r\n".repeat(200)
+        assertEquals(Charsets.UTF_8, TxtParser.detectCharset(tmp(".txt").apply { writeText(normal) }))
+        assertEquals("GB18030", TxtParser.detectCharset(tmp(".txt").apply { writeBytes(normal.toByteArray(charset("GBK"))) }).name())
     }
 }

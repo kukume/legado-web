@@ -22,7 +22,7 @@ import { t } from '@/i18n'
 import RemoteScreen from './RemoteScreen.vue'
 
 interface BrowserEvent {
-  type: 'browser' | 'captcha' | 'sheet' | 'close'
+  type: 'browser' | 'captcha' | 'sheet' | 'close' | 'notice'
   token: string
   sourceName: string
   sourceUrl: string
@@ -36,6 +36,8 @@ interface BrowserEvent {
   proxy?: boolean
   /** 网页在服务器上的浏览器里打开，这里显示实时画面（远程浏览器） */
   remote?: boolean
+  /** 登录、变量设置中：先选择打开方式（远程浏览器 / 下载网页在本页显示） */
+  choose?: boolean
 }
 
 /** 弹窗中的一个网页（跳转后叠在上一个网页上，返回时移除） */
@@ -103,7 +105,23 @@ function disconnect() {
 watch(() => auth.token, (t) => (t ? connect() : disconnect()), { immediate: true })
 onBeforeUnmount(disconnect)
 
+/** 同一个书源的提示 10 秒内只显示一次（搜索时多个请求可能接连触发） */
+const noticeShown = new Map<string, number>()
+
 function onEvent(ev: BrowserEvent) {
+  if (ev.type === 'notice') {
+    const key = ev.sourceUrl + '|' + ev.title
+    const now = Date.now()
+    if (now - (noticeShown.get(key) ?? 0) < 10_000) return
+    noticeShown.set(key, now)
+    if (ev.title === 'remote-browser-required') {
+      message.warning(
+        t('「{0}」需要打开网页才能继续（如人机验证、登录），但服务器没有配置远程浏览器。请联系管理员在“系统设置”中设置浏览器调试地址并开启远程浏览器。', [ev.sourceName]),
+        { duration: 8000, closable: true },
+      )
+    }
+    return
+  }
   if (ev.type === 'sheet') {
     sheet.value = ev
     return
@@ -112,11 +130,14 @@ function onEvent(ev: BrowserEvent) {
     queue.value = queue.value.filter((q) => q.token !== ev.token)
     return
   }
-  if (!queue.value.some((q) => q.token === ev.token)) queue.value = [...queue.value, ev]
+  // 同一个 token 的新事件（选择打开方式后）替换原来的
+  if (queue.value.some((q) => q.token === ev.token)) queue.value = queue.value.map((q) => (q.token === ev.token ? ev : q))
+  else queue.value = [...queue.value, ev]
 }
 
 watch(current, (ev, old) => {
-  if (ev?.token === old?.token) return
+  // 同一个网页：只有从“选择打开方式”变成正式网页时才重新准备
+  if (ev?.token === old?.token && !(old?.choose && !ev?.choose)) return
   captcha.value = ''
   cookie.value = ''
   openedExternal.value = false
@@ -363,6 +384,21 @@ async function submit(body: { url?: string; body?: string; cancel?: boolean; coo
   }
 }
 
+/** 选择打开方式：服务器随后推送正式的网页事件（同一个 token） */
+const choosing = ref(false)
+async function chooseMode(mode: 'remote' | 'page') {
+  const ev = current.value
+  if (!ev) return
+  choosing.value = true
+  try {
+    await http.post(`/api/browser/${encodeURIComponent(ev.token)}/mode`, { mode })
+  } catch (e: any) {
+    message.error(e.message)
+  } finally {
+    choosing.value = false
+  }
+}
+
 async function finish() {
   const ev = current.value
   if (!ev) return
@@ -463,13 +499,22 @@ const captchaSrc = computed(() =>
     :show="!!current"
     preset="card"
     :title="current ? `${current.title} · ${current.sourceName}` : ''"
-    :style="current?.type === 'captcha' ? 'max-width: 420px' : current?.remote ? 'width: min(480px, 100vw - 24px)' : externalUrl ? 'width: min(560px, 100vw - 24px)' : 'width: min(960px, 100vw - 24px)'"
+    :style="current?.type === 'captcha' || current?.choose ? 'max-width: 460px' : current?.remote ? 'width: min(480px, 100vw - 24px)' : externalUrl ? 'width: min(560px, 100vw - 24px)' : 'width: min(960px, 100vw - 24px)'"
     :mask-closable="false"
     :close-on-esc="false"
     :closable="false"
     :class="{ 'remote-modal': current?.remote }"
   >
-    <remote-screen v-if="current?.type === 'browser' && current.remote" :key="current.token" :token="current.token" />
+    <div v-if="current?.type === 'browser' && current.choose" class="choose-mode">
+      <p class="muted">{{ t('书源要打开网页：') }}<span class="mono">{{ current.url }}</span></p>
+      <p>{{ t('请选择打开方式：') }}</p>
+      <div class="choose-buttons">
+        <n-button type="primary" :loading="choosing" @click="chooseMode('remote')">{{ t('远程浏览器') }}</n-button>
+        <n-button :disabled="choosing" @click="chooseMode('page')">{{ t('浏览器渲染') }}</n-button>
+      </div>
+      <p class="muted small">{{ t('远程浏览器：在服务器上的真实浏览器里打开网页，适合人机验证、需要登录的网站。浏览器渲染：由服务器取回网页，在你当前的浏览器里显示，打开更快，但部分网站可能无法正常使用。') }}</p>
+    </div>
+    <remote-screen v-else-if="current?.type === 'browser' && current.remote" :key="current.token" :token="current.token" />
     <template v-else-if="current?.type === 'browser'">
       <div v-if="topProxied" class="proxy-bar">
         <n-button v-if="pages.length > 1" size="tiny" quaternary @click="backProxied">{{ t('返回') }}</n-button>
@@ -547,7 +592,7 @@ const captchaSrc = computed(() =>
     <template #footer>
       <n-space justify="end">
         <n-button :disabled="submitting" @click="cancel">{{ t('取消') }}</n-button>
-        <n-button type="primary" :loading="submitting" @click="finish">{{ t('完成') }}</n-button>
+        <n-button v-if="!current?.choose" type="primary" :loading="submitting" @click="finish">{{ t('完成') }}</n-button>
       </n-space>
     </template>
   </n-modal>
@@ -591,6 +636,23 @@ const captchaSrc = computed(() =>
 </template>
 
 <style scoped>
+.choose-mode p {
+  margin: 0 0 10px;
+  word-break: break-all;
+}
+
+.choose-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.choose-mode .small {
+  font-size: 12.5px;
+  margin: 0;
+}
+
 .frame {
   width: 100%;
   height: min(70vh, 720px);

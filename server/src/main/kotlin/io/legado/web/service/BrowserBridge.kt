@@ -47,7 +47,7 @@ class BrowserBridge : SourceVerificationHelp.Handler {
 
     /** 推送给前端的事件 */
     data class BrowserEvent(
-        /** browser：书源网页（等待完成）；captcha：图片验证码；sheet：底部弹窗网页（不等待）；close：请求已结束 */
+        /** browser：书源网页（等待完成）；captcha：图片验证码；sheet：底部弹窗网页（不等待）；close：请求已结束；notice：只提示（title 为原因） */
         val type: String,
         val token: String,
         val sourceName: String = "",
@@ -71,6 +71,11 @@ class BrowserBridge : SourceVerificationHelp.Handler {
         val proxy: Boolean = false,
         /** 网页在服务器上的浏览器里打开，前端显示实时画面并转发操作（远程浏览器） */
         val remote: Boolean = false,
+        /**
+         * 书源登录、变量设置中，远程浏览器可用时先让用户选择打开方式（远程浏览器 / 下载网页在本页显示）。
+         * 选择后用同一个 token 推送正式的事件
+         */
+        val choose: Boolean = false,
     )
 
     /** 网页中的请求（经服务器转发） */
@@ -106,8 +111,10 @@ class BrowserBridge : SourceVerificationHelp.Handler {
 
     private class Pending(
         val userId: Long,
-        val event: BrowserEvent,
+        @Volatile var event: BrowserEvent,
         val future: CompletableFuture<BrowserResult> = CompletableFuture(),
+        /** choose 事件：用户选择的打开方式（remote / page） */
+        val mode: CompletableFuture<String> = CompletableFuture(),
     )
 
     private class Listener(val clientId: String?, val channel: Channel<String>)
@@ -121,6 +128,9 @@ class BrowserBridge : SourceVerificationHelp.Handler {
 
     /** 后台设置中是否开启远程浏览器（由 Application 设置）；关闭时按原来的方式交给前端显示 */
     var remoteEnabled: () -> Boolean = { false }
+
+    /** 远程浏览器可用：设置了浏览器调试地址，并且开启了“使用远程浏览器” */
+    private fun remoteAvailable() = remoteBrowser != null && remoteEnabled()
 
     /** 远程网页：排队时 session 为 null；轮到后打开，打开失败时 error 不为空 */
     private class RemoteEntry(val userId: Long) {
@@ -168,6 +178,8 @@ class BrowserBridge : SourceVerificationHelp.Handler {
         private const val MAX_WAIT_MS = 10 * 60_000L
         /** 远程网页没人看多久后自动关闭 */
         private const val ABANDON_MS = 15_000L
+        /** notice 事件的原因：需要远程浏览器（前端据此显示本地化的提示） */
+        const val NOTICE_REMOTE_REQUIRED = "remote-browser-required"
         private const val MAX_HTML = 4 * 1024 * 1024
         private const val SESSION_TTL = 2 * 3600_000L
         private const val MAX_PROXY_BODY = 2 * 1024 * 1024
@@ -311,6 +323,7 @@ class BrowserBridge : SourceVerificationHelp.Handler {
      * 没开启远程浏览器、没有浏览器或不是网址时返回 null（按原来的方式交给前端显示）
      */
     private fun remoteRequest(source: BaseSource, url: String): RemoteBrowserManager.OpenRequest? {
+        // 只接管 http(s) 网址；书源自己生成的 data:text/html 网页（如设置中心）在用户当前的浏览器里渲染
         if (remoteBrowser == null || !url.startsWith("http", true) || !remoteEnabled()) return null
         return try {
             val analyzeUrl = AnalyzeUrl(url, source = source)
@@ -381,29 +394,50 @@ class BrowserBridge : SourceVerificationHelp.Handler {
         val userId = ctx.userId
         if (userId == 0L || !hasListener(userId)) return null
         val token = UUID.randomUUID().toString()
+        // 没有远程浏览器：只有书源的登录、变量设置中才改为下载网页交给前端显示；
+        // 搜索、发现、阅读等地方只提示，不打开网页（结果按用户取消处理，返回空内容）
+        if (useBrowser && !remoteAvailable() && !ctx.allowPageFallback) {
+            broadcast(userId, BrowserEvent("notice", token, source.getTag(), source.getKey(), NOTICE_REMOTE_REQUIRED), ctx.clientId)
+            return url to ""
+        }
         val remoteReq = if (useBrowser && html.isNullOrBlank()) remoteRequest(source, url) else null
-        val event = if (remoteReq != null) {
-            BrowserEvent("browser", token, source.getTag(), source.getKey(), title.ifBlank { "书源网页" }, remoteReq.url, remote = true)
-        } else if (useBrowser) {
+        // 登录、变量设置中两种方式都可用：先让用户选择
+        val choose = remoteReq != null && ctx.allowPageFallback
+        val pageTitle = title.ifBlank { "书源网页" }
+        /** 下载网页交给前端显示的事件（会建立网页请求的转发权限，选定后才调用） */
+        fun pageEvent(): BrowserEvent {
             val (pageUrl, pageHtml) = resolveSourceUrl(source, url, html) ?: pageContent(url, html)
             val needCookie = if (pageHtml == null && pageUrl.startsWith("http", true)) BrowserCookieHint.needsCookie(source) else null
             val proxy = openSession(token, userId, source, pageUrl, pageHtml)
-            BrowserEvent("browser", token, source.getTag(), source.getKey(), title.ifBlank { "书源网页" }, pageUrl, pageHtml, needCookie = needCookie, proxy = proxy)
-        } else {
-            BrowserEvent("captcha", token, source.getTag(), source.getKey(), title.ifBlank { "请输入验证码" }, url)
+            return BrowserEvent("browser", token, source.getTag(), source.getKey(), pageTitle, pageUrl, pageHtml, needCookie = needCookie, proxy = proxy)
+        }
+        val event = when {
+            choose -> BrowserEvent("browser", token, source.getTag(), source.getKey(), pageTitle, remoteReq!!.url, choose = true)
+            remoteReq != null -> BrowserEvent("browser", token, source.getTag(), source.getKey(), pageTitle, remoteReq.url, remote = true)
+            useBrowser -> pageEvent()
+            else -> BrowserEvent("captcha", token, source.getTag(), source.getKey(), title.ifBlank { "请输入验证码" }, url)
         }
         val p = Pending(userId, event)
         pending[token] = p
-        val remoteEntry = remoteReq?.let { RemoteEntry(userId).also { e -> remoteSessions[token] = e } }
+        var remoteEntry = if (remoteReq != null && !choose) RemoteEntry(userId).also { e -> remoteSessions[token] = e } else null
         ctx.waitingForUser.incrementAndGet()
         val started = System.currentTimeMillis()
         try {
             broadcast(userId, event, ctx.clientId)
+            if (choose && waitForMode(p, ctx) == "remote") {
+                remoteEntry = RemoteEntry(userId).also { e -> remoteSessions[token] = e }
+                p.event = event.copy(choose = false, remote = true)
+                broadcast(userId, p.event, ctx.clientId)
+            } else if (choose && !p.future.isDone) {
+                p.event = pageEvent()
+                broadcast(userId, p.event, ctx.clientId)
+            }
             // 远程浏览器：先弹出窗口（显示排队情况），轮到后再打开网页
-            if (remoteReq != null && remoteEntry != null) remoteBrowser?.let { startRemote(it, token, remoteReq, remoteEntry, p, ctx) }
+            val entry = remoteEntry
+            if (remoteReq != null && entry != null) remoteBrowser?.let { startRemote(it, token, remoteReq, entry, p, ctx) }
             val result = waitFor(p, ctx) {
                 // 远程网页没人看了（刷新、关闭了页面）：自动取消，释放浏览器给排队的下一个
-                remoteEntry != null && abandoned(remoteEntry).also { if (it) logger.info("远程网页已无人查看，自动关闭") }
+                entry != null && abandoned(entry).also { if (it) logger.info("远程网页已无人查看，自动关闭") }
             }
             // 取消：返回空内容（App 中关闭浏览器也不会报错），书源读取不到结果时不会保存
             if (result.cancel) return url to ""
@@ -435,6 +469,37 @@ class BrowserBridge : SourceVerificationHelp.Handler {
         )
         broadcast(ctx.userId, event, ctx.clientId)
         return true
+    }
+
+    /**
+     * 等用户选择打开方式；用户取消（结果已提交）或页面长时间无人查看时返回 null（随后按取消处理）
+     */
+    private fun waitForMode(p: Pending, ctx: EngineContext): String? {
+        val deadline = System.currentTimeMillis() + MAX_WAIT_MS
+        while (!p.future.isDone) {
+            if (ctx.cancelled) throw kotlinx.coroutines.CancellationException("请求已取消")
+            val since = offlineSince[p.userId]
+            if (since != null && !hasListener(p.userId) && System.currentTimeMillis() - since > ABANDON_MS) {
+                p.future.complete(BrowserResult(cancel = true))
+                return null
+            }
+            if (System.currentTimeMillis() > deadline) throw NoStackTraceException("等待网页操作超时")
+            try {
+                return p.mode.get(500, TimeUnit.MILLISECONDS)
+            } catch (_: TimeoutException) {
+                // 继续等待
+            }
+        }
+        return null
+    }
+
+    /** 用户选择打开方式：remote（远程浏览器）或 page（下载网页在本页显示） */
+    fun chooseMode(userId: Long, token: String, mode: String) {
+        val p = pending[token] ?: throw NotFoundException("该网页请求已结束")
+        if (p.userId != userId) throw ForbiddenException()
+        if (!p.event.choose) throw BadRequestException("这个网页不需要选择打开方式")
+        if (mode != "remote" && mode != "page") throw BadRequestException("打开方式无效")
+        p.mode.complete(mode)
     }
 
     private fun waitFor(p: Pending, ctx: EngineContext, abandoned: () -> Boolean = { false }): BrowserResult {

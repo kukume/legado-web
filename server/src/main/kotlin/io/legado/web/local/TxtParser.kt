@@ -18,6 +18,11 @@ object TxtParser {
 
     data class Chapter(val title: String, val start: Long, val end: Long)
 
+    /** 文本里允许的控制字符：	 
+ 换页 
+ */
+    private val TEXT_CONTROLS = setOf(0x09, 0x0A, 0x0C, 0x0D)
+
     private val BINARY_MAGIC = listOf(
         byteArrayOf(0x50, 0x4B, 0x03, 0x04), // zip / epub / docx
         "%PDF".toByteArray(), "MZ".toByteArray(), byteArrayOf(0x7F, 0x45, 0x4C, 0x46), // pdf / exe / elf
@@ -36,7 +41,11 @@ object TxtParser {
         if (head.size >= 3 && head[0] == 0xEF.toByte() && head[1] == 0xBB.toByte() && head[2] == 0xBF.toByte()) return Charsets.UTF_8
         if (head.size >= 2 && head[0] == 0xFF.toByte() && head[1] == 0xFE.toByte()) return Charsets.UTF_16LE
         if (head.size >= 2 && head[0] == 0xFE.toByte() && head[1] == 0xFF.toByte()) return Charsets.UTF_16BE
-        if (head.take(8192).any { it == 0.toByte() }) throw LocalBookException("这不是文本文件（包含二进制内容）")
+        val sample = head.copyOf(minOf(head.size, 8192))
+        if (sample.any { it == 0.toByte() }) throw LocalBookException("这不是文本文件（包含二进制内容）")
+        // 控制字符（制表、换行、换页、回车以外的 0x01–0x1F 和 0x7F）太多：二进制内容
+        val controls = sample.count { b -> val c = b.toInt() and 0xFF; (c < 0x20 && c !in TEXT_CONTROLS) || c == 0x7F }
+        if (controls > maxOf(8, sample.size / 50)) throw LocalBookException("这不是文本文件（包含二进制内容）")
         // 严格按 UTF-8 解码（末尾可能截断了一个多字节字符）
         val decoder = Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT)
         var len = head.size
@@ -49,7 +58,13 @@ object TxtParser {
                 len--
             }
         }
-        return Charset.forName("GB18030")
+        // 不是 UTF-8 时按 GB18030 处理；GB18030 也解不通的比例太高，说明不是文本（或是无法识别的编码）
+        val gb = Charset.forName("GB18030")
+        val decoded = gb.newDecoder().onMalformedInput(CodingErrorAction.REPLACE).onUnmappableCharacter(CodingErrorAction.REPLACE)
+            .decode(ByteBuffer.wrap(head))
+        val bad = (0 until decoded.length).count { decoded[it] == '\uFFFD' }
+        if (bad > 4 && bad * 100 > decoded.length) throw LocalBookException("无法识别文本编码（可能不是文本文件）")
+        return gb
     }
 
     /** 把 [src] 转为 UTF-8（无 BOM、换行统一为 \n）保存到 [dest] */

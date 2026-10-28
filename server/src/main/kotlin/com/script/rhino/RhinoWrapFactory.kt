@@ -50,6 +50,10 @@ object RhinoWrapFactory : WrapFactory() {
 
     private val factories = hashMapOf<Class<*>, JavaObjectWrapFactory>()
 
+    // URL.openConnection / openStream / getContent 会发起网络请求，绕过只作用于 OkHttp 的内网防护，屏蔽之
+    private val urlBlockedMethods = setOf("openConnection", "openStream", "getContent")
+    private val urlConnectionBlockedMethods = setOf("getInputStream", "getOutputStream", "connect", "getContent")
+
     override fun wrapAsJavaObject(
         cx: Context,
         scope: VarScope?,
@@ -58,6 +62,11 @@ object RhinoWrapFactory : WrapFactory() {
     ): Scriptable? {
         if (!RhinoClassShutter.visibleToScripts(javaObject)) {
             return null
+        }
+        // URL / URLConnection：允许解析地址，屏蔽发起网络请求的方法（否则会绕过内网防护）
+        when (javaObject) {
+            is java.net.URL -> return ProtectedNativeJavaObject(scope, javaObject, java.net.URL::class.java, urlBlockedMethods)
+            is java.net.URLConnection -> return ProtectedNativeJavaObject(scope, javaObject, java.net.URLConnection::class.java, urlConnectionBlockedMethods)
         }
         val declaredType = staticType ?: TypeInfo.NONE
         val useRuntimeListType = javaObject.javaClass.name == JSoupElementsClassName &&

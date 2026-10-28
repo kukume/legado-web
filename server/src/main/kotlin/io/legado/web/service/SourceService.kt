@@ -438,16 +438,11 @@ class SourceService(
      * 书源校验的结果写回书源（与 App 相同）：去掉旧的“…失效”“校验超时”分组，失败时加上新的分组，记录响应时间。
      * 只修改自己能编辑的书源，返回是否能修改（公共书源普通用户不能改）
      */
-    suspend fun applyCheckResult(user: UserPrincipal, id: Long, invalidGroup: String?, time: Long): Boolean = dbQuery {
+    /** 校验后记录响应时间（用于排序，不改分组）；返回当前用户能否修改 / 删除这个书源 */
+    suspend fun recordCheckTime(user: UserPrincipal, id: Long, time: Long): Boolean = dbQuery {
         val row = BookSources.selectAll().where { BookSources.id eq id }.firstOrNull() ?: return@dbQuery false
         BookSources.update({ BookSources.id eq id }) { it[respondTime] = time }
-        if (!row.canEdit(user)) return@dbQuery false
-        val src = row.toSource()
-        val before = src.bookSourceGroup
-        src.removeInvalidGroups()
-        invalidGroup?.let { src.addGroup(it) }
-        if (src.bookSourceGroup != before) writeSource(id, src, null)
-        true
+        row.canEdit(user)
     }
 
     /** 更新书源响应时间（用于排序） */

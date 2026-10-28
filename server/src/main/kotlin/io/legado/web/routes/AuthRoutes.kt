@@ -38,7 +38,6 @@ data class PublicConfig(
 data class MeResponse(
     val user: UserDto,
     val canAddSource: Boolean,
-    val canInvite: Boolean,
 )
 data class CreateInviteRequest(val count: Int = 1, val maxUses: Int = 1, val expireDays: Int? = null, val note: String? = null)
 data class UpdateInviteRequest(val disabled: Boolean = false)
@@ -92,7 +91,6 @@ fun Route.authRoutes(
                         user = u,
                         canAddSource = u.role == "admin" || u.canAddSource ||
                             settings.getBool(SettingService.ALLOW_USER_SOURCES),
-                        canInvite = u.role == "admin" || settings.getBool(SettingService.ALLOW_USER_INVITE),
                     )
                 )
             }
@@ -105,25 +103,25 @@ fun Route.authRoutes(
     }
 
     authenticate(AUTH_JWT) {
-        // 邀请码：管理员看全部，普通用户看自己的
+        // 邀请码：只有管理员可以生成和管理
         route("/api/invites") {
             get {
-                val u = call.user
-                call.respond(userService.listInvites(if (u.isAdmin) null else u.id))
+                call.requireAdmin()
+                call.respond(userService.listInvites(null))
             }
             post {
-                val u = call.user
+                val admin = call.requireAdmin()
                 val req = call.receive<CreateInviteRequest>()
-                call.respond(userService.createInvites(u.id, req.count, req.maxUses, req.expireDays, req.note, u.isAdmin))
+                call.respond(userService.createInvites(admin.id, req.count, req.maxUses, req.expireDays, req.note))
             }
             patch("/{id}") {
-                val u = call.user
-                userService.updateInvite(u.id, u.isAdmin, call.longParam("id"), call.receive<UpdateInviteRequest>().disabled)
+                call.requireAdmin()
+                userService.updateInvite(call.longParam("id"), call.receive<UpdateInviteRequest>().disabled)
                 call.respond(OkResponse())
             }
             delete("/{id}") {
-                val u = call.user
-                userService.deleteInvite(u.id, u.isAdmin, call.longParam("id"))
+                call.requireAdmin()
+                userService.deleteInvite(call.longParam("id"))
                 call.respond(OkResponse())
             }
         }

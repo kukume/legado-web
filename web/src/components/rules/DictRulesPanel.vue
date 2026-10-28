@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { useIsMobile } from '@/composables/useIsMobile'
 import { mobileColumns, useSelectAll } from '@/utils/mobileTable'
-import { computed, h, onMounted, ref } from 'vue'
+import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import Sortable from 'sortablejs'
+import { ReorderThreeOutline } from '@vicons/ionicons5'
 import {
-  NAlert, NButton, NCheckbox, NDataTable, NForm, NFormItem, NInput, NInputNumber, NModal, NSpace, NSwitch,
+  NAlert, NButton, NCheckbox, NDataTable, NForm, NFormItem, NIcon, NInput, NModal, NSpace, NSwitch,
   useDialog, useMessage, type DataTableColumns,
 } from 'naive-ui'
 import { dictApi } from '@/api'
@@ -69,13 +71,45 @@ async function toggle(r: DictRule, v: boolean) {
   }
 }
 
-async function setOrder(r: DictRule, v: number | null) {
-  if (v === null || v === r.sortNumber) return
+/** 拖动排序：桌面拖左侧的把手，手机上长按整行后拖动 */
+const tableWrap = ref<HTMLElement | null>(null)
+let sortable: Sortable | null = null
+function setupSortable() {
+  sortable?.destroy()
+  sortable = null
+  const tbody = tableWrap.value?.querySelector<HTMLElement>('.n-data-table-tbody')
+  if (!tbody || rules.value.length < 2) return
+  sortable = Sortable.create(tbody, {
+    animation: 150,
+    // 表格行用原生拖放时拖影效果很差，改用鼠标 / 触摸事件模拟拖动
+    forceFallback: true,
+    handle: isMobile.value ? undefined : '.drag-handle',
+    // 手机上长按后才拖动，不影响滚动
+    delay: 250,
+    delayOnTouchOnly: true,
+    ghostClass: 'drag-ghost',
+    onEnd: (e) => {
+      const { oldIndex, newIndex, from, item } = e
+      if (oldIndex == null || newIndex == null || oldIndex === newIndex) return
+      // 把 DOM 还原，交给 Vue 按新的数据重新渲染
+      from.insertBefore(item, from.children[oldIndex > newIndex ? oldIndex + 1 : oldIndex] ?? null)
+      moveRule(oldIndex, newIndex)
+    },
+  })
+}
+onBeforeUnmount(() => sortable?.destroy())
+
+async function moveRule(from: number, to: number) {
+  const list = [...rules.value]
+  const [moved] = list.splice(from, 1)
+  list.splice(to, 0, moved)
+  list.forEach((r, i) => (r.sortNumber = i))
+  rules.value = list
   try {
-    await dictApi.save({ ...r, sortNumber: v }, r.name)
-    await load()
+    await dictApi.saveOrder(list.map((r) => r.name))
   } catch (e: any) {
     message.error(e.message)
+    await load()
   }
 }
 
@@ -137,6 +171,8 @@ function test(r: DictRule) {
 
 const isMobile = useIsMobile()
 const selectAll = useSelectAll(rules, checked, (r: DictRule) => r.name)
+// 表格行数、手机 / 桌面切换后表格会重新渲染，重新绑定拖动
+watch([() => rules.value.length, isMobile, loading], () => nextTick(setupSortable))
 
 /** 手机上与 App 一样只显示多选、名称、启用和菜单 */
 const mobileCols = computed(() =>
@@ -154,6 +190,10 @@ const mobileCols = computed(() =>
 )
 
 const columns = computed<DataTableColumns<DictRule>>(() => isMobile.value ? mobileCols.value : [
+  {
+    key: 'drag', width: 36, align: 'center',
+    render: () => h(NIcon, { class: 'drag-handle', size: 18, component: ReorderThreeOutline, title: t('拖动排序') }),
+  },
   { type: 'selection' },
   {
     title: t('启用'), key: 'enabled', width: 70,
@@ -161,10 +201,6 @@ const columns = computed<DataTableColumns<DictRule>>(() => isMobile.value ? mobi
   },
   { title: t('名称'), key: 'name', minWidth: 100 },
   { title: t('网址规则'), key: 'urlRule', ellipsis: { tooltip: { contentStyle: { maxWidth: '480px' } } }, render: (r) => h('span', { class: 'mono' }, r.urlRule) },
-  {
-    title: t('排序'), key: 'sortNumber', width: 100,
-    render: (r) => h(NInputNumber, { size: 'tiny', value: r.sortNumber, showButton: false, onUpdateValue: (v: number | null) => setOrder(r, v) }),
-  },
   {
     title: t('操作'), key: 'op', width: 170,
     render: (r) => h(NSpace, { size: 4, wrap: false }, () => [
@@ -192,6 +228,7 @@ const columns = computed<DataTableColumns<DictRule>>(() => isMobile.value ? mobi
     <n-alert v-if="!canEdit" type="info" :bordered="false" style="margin-bottom: 12px">
       {{ t('字典规则会在服务器上请求网址、执行 JS，新建、修改和导入需要“添加书源”的权限。你可以使用、启用或停用、排序已有的规则。') }}
     </n-alert>
+    <div ref="tableWrap">
     <n-data-table
       v-model:checked-row-keys="checked"
       :columns="columns"
@@ -203,6 +240,7 @@ const columns = computed<DataTableColumns<DictRule>>(() => isMobile.value ? mobi
       :scroll-x="isMobile ? undefined : 720"
       :table-layout="isMobile ? 'fixed' : 'auto'"
     />
+    </div>
 
     <n-modal :show="!!editing" preset="card" :title="editing?.oldName ? (canEdit ? t('编辑字典规则') : t('查看字典规则')) : t('新建字典规则')"
       style="width: 640px; max-width: 94vw" :auto-focus="false" @update:show="(v: boolean) => !v && (editing = null)">
@@ -216,7 +254,6 @@ const columns = computed<DataTableColumns<DictRule>>(() => isMobile.value ? mobi
           <n-input v-model:value="editing!.rule.showRule" type="textarea" :autosize="{ minRows: 3, maxRows: 16 }" class="mono"
             :placeholder="t('留空时直接显示网页内容；可用 CSS、XPath、JSONPath、@js: 等规则提取')" />
         </n-form-item>
-        <n-form-item :label="t('排序')"><n-input-number v-model:value="editing!.rule.sortNumber" /></n-form-item>
       </n-form>
       <template v-if="canEdit" #footer>
         <n-space justify="end"><n-button type="primary" :loading="saving" @click="save">{{ t('保存') }}</n-button></n-space>
@@ -233,3 +270,15 @@ const columns = computed<DataTableColumns<DictRule>>(() => isMobile.value ? mobi
     <dict-modal v-model:show="showTest" :word="testWord" :rule-name="testRule" />
   </div>
 </template>
+
+<style scoped>
+:deep(.drag-handle) {
+  cursor: grab;
+  color: var(--app-text-3, #999);
+  vertical-align: middle;
+}
+
+:deep(.drag-ghost) {
+  opacity: 0.4;
+}
+</style>

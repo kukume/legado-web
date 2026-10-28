@@ -2,7 +2,6 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { NButton, NCard, NDescriptions, NDescriptionsItem, NInput, NRadioButton, NRadioGroup, NSpace, useMessage } from 'naive-ui'
-import InviteManager from '@/components/InviteManager.vue'
 import ApiKeyManager from '@/components/ApiKeyManager.vue'
 import OfflineManager from '@/components/OfflineManager.vue'
 import BackupManager from '@/components/BackupManager.vue'
@@ -96,10 +95,6 @@ function logout() {
 
     <n-card :title="t('API Key（开放接口）')" size="small" class="block">
       <api-key-manager />
-    </n-card>
-
-    <n-card v-if="auth.me?.canInvite && !auth.isAdmin" :title="t('我的邀请码')" size="small" class="block">
-      <invite-manager />
     </n-card>
   </div>
 </template>

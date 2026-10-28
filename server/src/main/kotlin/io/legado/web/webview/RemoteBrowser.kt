@@ -201,6 +201,9 @@ class RemoteSession internal constructor(
     /** 网页视口：跟着前端弹窗里画面区域的大小（打开时和弹窗大小变化时由前端告知），按手机模式排版 */
     private var viewport = 412 to 860
 
+    /** 像素密度：跟着用户屏幕的 devicePixelRatio（1–3），高分屏上画面不模糊 */
+    private var scale = 2.0
+
     private suspend fun cmd(method: String, params: JsonObject = JsonObject()) = conn.send(method, params, sessionId)
     private fun cmdAsync(method: String, params: JsonObject = JsonObject()) = conn.sendAsync(method, params, sessionId)
 
@@ -242,14 +245,7 @@ class RemoteSession internal constructor(
         cmd("Fetch.enable", JsonObject().apply {
             add("patterns", JsonArray().apply { add(JsonObject().apply { addProperty("urlPattern", "*") }) })
         })
-        cmd("Page.startScreencast", JsonObject().apply {
-            addProperty("format", "jpeg")
-            addProperty("quality", 70)
-            // 2 倍像素密度下限制画面尺寸，控制每帧的大小
-            addProperty("maxWidth", 900)
-            addProperty("maxHeight", 1900)
-            addProperty("everyNthFrame", 1)
-        })
+        startScreencast()
         cmd("Page.navigate", JsonObject().apply {
             addProperty("url", req.url)
             referer?.let { addProperty("referrer", it) }
@@ -261,10 +257,66 @@ class RemoteSession internal constructor(
         cmd("Emulation.setDeviceMetricsOverride", JsonObject().apply {
             addProperty("width", w)
             addProperty("height", h)
-            // 2 倍像素密度：画面上的文字清晰（与手机屏幕一样）
-            addProperty("deviceScaleFactor", 2)
+            // 按用户屏幕的像素密度渲染：画面上的文字清晰
+            addProperty("deviceScaleFactor", scale)
             addProperty("mobile", true)
         })
+    }
+
+    @Volatile
+    private var screencasting = false
+
+    /**
+     * 开始（或按新的大小重新开始）监听画面变化。
+     * 无头浏览器的 screencast 帧总是按 CSS 像素输出（不管像素密度），在高分屏上放大显示会模糊，
+     * 所以它只用来得知“画面变了”，真正推给用户的是按像素密度截的图（见 [captureSharp]）
+     */
+    private suspend fun startScreencast() {
+        if (screencasting) runCatching { cmd("Page.stopScreencast") }
+        val (w, h) = viewport
+        cmd("Page.startScreencast", JsonObject().apply {
+            addProperty("format", "jpeg")
+            addProperty("quality", 70)
+            addProperty("maxWidth", w)
+            addProperty("maxHeight", h)
+            addProperty("everyNthFrame", 1)
+        })
+        screencasting = true
+    }
+
+    /** 正在截高清图；截图期间画面又变了时置 [sharpDirty]，截完再截一次（同一时间只截一张） */
+    private val sharpBusy = AtomicBoolean(false)
+
+    @Volatile
+    private var sharpDirty = false
+
+    /** 最新的低清帧（截图失败时用它） */
+    @Volatile
+    private var lastCast: Frame? = null
+
+    /** 画面变了：按像素密度截一张高清图推给用户 */
+    private fun captureSharp() {
+        sharpDirty = true
+        if (!sharpBusy.compareAndSet(false, true)) return
+        scope.launch {
+            try {
+                while (sharpDirty && !closed.get()) {
+                    sharpDirty = false
+                    val cast = lastCast ?: break
+                    val shot = runCatching {
+                        cmd("Page.captureScreenshot", JsonObject().apply {
+                            addProperty("format", "jpeg")
+                            addProperty("quality", 85)
+                        }).get("data")?.asString
+                    }.getOrNull()
+                    frames.value = if (shot != null) cast.copy(data = shot) else cast
+                }
+            } finally {
+                sharpBusy.set(false)
+                // 刚结束时又来了新的变化：重新开始
+                if (sharpDirty && !closed.get()) captureSharp()
+            }
+        }
     }
 
     private suspend fun setCookies() {
@@ -288,12 +340,15 @@ class RemoteSession internal constructor(
             "Page.screencastFrame" -> {
                 cmdAsync("Page.screencastFrameAck", JsonObject().apply { addProperty("sessionId", params.get("sessionId").asInt) })
                 val meta = params.getAsJsonObject("metadata")
-                frames.value = Frame(
+                val cast = Frame(
                     params.get("data").asString,
                     meta.get("deviceWidth").asDouble,
                     meta.get("deviceHeight").asDouble,
                     meta.get("offsetTop")?.asDouble ?: 0.0,
                 )
+                lastCast = cast
+                // 1 倍屏直接用低清帧（已经是原始清晰度），否则截高清图
+                if (scale <= 1.0) frames.value = cast else captureSharp()
             }
             "Page.frameNavigated" -> {
                 val frame = params.getAsJsonObject("frame")
@@ -377,6 +432,8 @@ class RemoteSession internal constructor(
         val keyCode: Int = 0,
         val width: Int = 0,
         val height: Int = 0,
+        /** resize：用户屏幕的 devicePixelRatio */
+        val dpr: Double = 0.0,
     )
 
     suspend fun input(e: Input) {
@@ -425,9 +482,12 @@ class RemoteSession internal constructor(
             "reload" -> cmd("Page.reload")
             "resize" -> if (e.width > 0 && e.height > 0) {
                 val v = e.width.coerceIn(280, 1600) to e.height.coerceIn(280, 1600)
-                if (v != viewport) {
+                val s = if (e.dpr > 0) e.dpr.coerceIn(1.0, 3.0) else scale
+                if (v != viewport || s != scale) {
                     viewport = v
+                    scale = s
                     applyViewport()
+                    startScreencast()
                 }
             }
         }

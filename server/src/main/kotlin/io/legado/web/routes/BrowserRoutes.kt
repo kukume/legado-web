@@ -23,6 +23,7 @@ import kotlin.time.Duration.Companion.seconds
 /**
  * - GET  /api/events?token=&client=   SSE：推送书源脚本打开的网页 / 验证码（client 为标签页 id）
  * - POST /api/browser/{token}   提交用户操作结果 { url, body, cancel }
+ * - POST /api/browser/{token}/mode   选择打开方式 { mode: remote | page }（书源登录、变量设置中）
  * - POST /api/browser/{token}/fetch   转发网页中的请求（只能访问书源自己的网站）
  * - POST /api/browser/{token}/cookie  网页中 document.cookie 写入的 Cookie
  * - GET  /api/browser/{token}/screen?token=&w=&h=   SSE：远程浏览器的实时画面（frame）和通知（info）
@@ -43,6 +44,11 @@ fun Route.browserRoutes(bridge: BrowserBridge) {
         post("/api/browser/{token}") {
             val token = call.parameters["token"]!!
             bridge.submit(call.user.id, token, call.receive<BrowserBridge.BrowserResult>())
+            call.respond(OkResponse())
+        }
+        post("/api/browser/{token}/mode") {
+            val token = call.parameters["token"]!!
+            bridge.chooseMode(call.user.id, token, call.receive<Map<String, String>>()["mode"].orEmpty())
             call.respond(OkResponse())
         }
         post("/api/browser/{token}/fetch") {
@@ -75,7 +81,8 @@ fun Route.browserRoutes(bridge: BrowserBridge) {
                 // 按前端显示区域的大小设置网页视口
                 val w = call.request.queryParameters["w"]?.toIntOrNull() ?: 0
                 val h = call.request.queryParameters["h"]?.toIntOrNull() ?: 0
-                if (w > 0 && h > 0) session.input(RemoteSession.Input(type = "resize", width = w, height = h))
+                val dpr = call.request.queryParameters["dpr"]?.toDoubleOrNull() ?: 0.0
+                if (w > 0 && h > 0) session.input(RemoteSession.Input(type = "resize", width = w, height = h, dpr = dpr))
                 heartbeat { period = 25.seconds }
                 coroutineScope {
                     val infoJob = launch {

@@ -13,8 +13,8 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 
 /**
- * 书源校验（与 App 的“校验书源”相同）：依次检查搜索 → 详情 → 目录 → 正文，
- * 失败的书源加上对应的分组（搜索失效、详情失效、目录失效、正文失效、校验超时），成功的去掉这些分组。
+ * 书源校验：依次检查搜索 → 详情 → 目录 → 正文，结果只返回给前端，不修改书源的分组
+ * （有问题的书源由用户在校验弹窗里直接删除）。只记录响应时间用于排序。
  */
 class SourceCheckService(
     private val sourceService: SourceService,
@@ -24,13 +24,13 @@ class SourceCheckService(
         val id: Long,
         val name: String,
         val ok: Boolean,
-        /** 失败时加上的分组，如“搜索失效” */
-        val group: String?,
+        /** 失败在哪一步：搜索失效、详情失效、目录失效、正文失效、校验超时 */
+        val stage: String?,
         val error: String?,
         /** 耗时（毫秒） */
         val time: Long,
-        /** 分组是否已写回书源（公共书源普通用户不能修改） */
-        val saved: Boolean,
+        /** 当前用户能否删除这个书源（自己的书源，或管理员） */
+        val editable: Boolean,
     )
 
     private class CheckFailure(val group: String, message: String) : Exception(message)
@@ -38,12 +38,12 @@ class SourceCheckService(
     companion object {
         /** 单个书源的校验超时 */
         const val TIMEOUT = 90_000L
-        const val DEFAULT_KEYWORD = "我的"
+        const val DEFAULT_KEYWORD = "牧神记"
     }
 
     /**
      * 校验 [ids] 中的书源（只校验当前用户可用的），每校验完一个通过 [emit] 推送结果。
-     * [keyword] 为空时用书源自己的校验关键字（ruleSearch.checkKeyWord），再没有就用“我的”
+     * [keyword] 为空时用书源自己的校验关键字（ruleSearch.checkKeyWord），再没有就用“牧神记”
      */
     suspend fun check(
         user: UserPrincipal,
@@ -76,7 +76,7 @@ class SourceCheckService(
         try {
             runEngine(user.id, TIMEOUT) {
                 if (source.searchUrl.isNullOrBlank()) {
-                    // 只有发现的书源没有可校验的搜索，跳过（不改分组）
+                    // 只有发现的书源没有可校验的搜索，跳过
                     if (source.exploreUrl.isNullOrBlank()) throw CheckFailure("搜索失效", "书源没有搜索和发现地址")
                     error = "书源没有搜索，跳过校验"
                     return@runEngine
@@ -124,7 +124,7 @@ class SourceCheckService(
             error = e.message ?: e.javaClass.simpleName
         }
         val time = System.currentTimeMillis() - start
-        val saved = runCatching { sourceService.applyCheckResult(user, id, group, time) }.getOrDefault(false)
-        return CheckResult(id, source.bookSourceName, group == null, group, error?.lineSequence()?.firstOrNull()?.take(300), time, saved)
+        val editable = runCatching { sourceService.recordCheckTime(user, id, time) }.getOrDefault(false)
+        return CheckResult(id, source.bookSourceName, group == null, group, error?.lineSequence()?.firstOrNull()?.take(300), time, editable)
     }
 }

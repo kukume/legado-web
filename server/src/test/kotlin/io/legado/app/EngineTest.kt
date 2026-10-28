@@ -259,9 +259,12 @@ class EngineTest {
             blocked("""new Packages.java.beans.XMLDecoder(new Packages.java.io.ByteArrayInputStream(new Packages.java.lang.String("<java/>").getBytes()))""", "java.beans.XMLDecoder")
             // 直连网络会绕过内网防护
             blocked("""new Packages.java.net.Socket("127.0.0.1", 1)""", "java.net.Socket")
-            blocked("""new Packages.java.net.URL("http://127.0.0.1/").openConnection()""", "java.net.URL")
-            // 通过 URI.toURL() 也拿不到可用的 URL 实例
-            blocked("""new Packages.java.net.URI("http://127.0.0.1/").toURL().openConnection()""", "URI.toURL()")
+            // URL 可以构造和解析，但不能用它发请求（openConnection / openStream 被屏蔽）
+            blocked("""new Packages.java.net.URL("http://127.0.0.1/").openConnection()""", "URL.openConnection")
+            blocked("""new Packages.java.net.URL("http://127.0.0.1/").openStream()""", "URL.openStream")
+            blocked("""new Packages.java.net.URI("http://127.0.0.1/").toURL().openConnection()""", "URI.toURL().openConnection")
+            // 解析地址仍然可用（书源常用）
+            assertEquals("127.0.0.1", source.evalJS("""String(new Packages.java.net.URL("http://127.0.0.1/x").getHost())"""))
             // 起线程可绕过超时 / 取消
             blocked("""var t=new Packages.java.lang.Thread(function(){}); t.start()""", "java.lang.Thread")
             // System.getProperty 信息泄露

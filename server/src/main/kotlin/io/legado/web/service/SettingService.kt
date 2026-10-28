@@ -19,9 +19,7 @@ class SettingService {
         /** 普通用户是否可以添加自己的书源（书源 JS 在服务器上执行，请谨慎开启） */
         const val ALLOW_USER_SOURCES = "allowUserSources"
         /** 普通用户是否可以生成邀请码 */
-        const val ALLOW_USER_INVITE = "allowUserInvite"
         /** 普通用户生成邀请码的数量上限 */
-        const val USER_INVITE_LIMIT = "userInviteLimit"
         const val SITE_NAME = "siteName"
         /** 是否允许用户上传本地书籍（EPUB / TXT） */
         const val LOCAL_BOOK_ENABLED = "localBookEnabled"
@@ -54,8 +52,6 @@ class SettingService {
         val defaults = mapOf(
             REGISTRATION_MODE to "invite",
             ALLOW_USER_SOURCES to "false",
-            ALLOW_USER_INVITE to "false",
-            USER_INVITE_LIMIT to "5",
             SITE_NAME to "阅读 Web",
             LOCAL_BOOK_ENABLED to "true",
             LOCAL_BOOK_MAX_MB to "50",

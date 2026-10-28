@@ -7,6 +7,7 @@ import SearchResultItem from '@/components/SearchResultItem.vue'
 import { shelfApi, sourceApi, toOpenRequest } from '@/api'
 import type { ExploreKind, SearchBook, SourceSummary } from '@/api/types'
 import { safeHref } from '@/utils/safeUrl'
+import { showSourceToast } from '@/utils/effects'
 import { t } from '@/i18n'
 
 defineOptions({ name: 'ExploreView' })
@@ -132,7 +133,7 @@ function itemStyle(k: ExploreKind) {
 }
 
 function applyEffects(r: { messages?: string[]; openUrls?: string[] }) {
-  r.messages?.forEach((m) => m && message.info(m, { duration: 5000 }))
+  r.messages?.forEach((m) => m && showSourceToast(message, m))
   if (r.openUrls?.length) {
     openLinks.value = r.openUrls
     r.openUrls.forEach((u) => window.open(u, '_blank', 'noopener'))

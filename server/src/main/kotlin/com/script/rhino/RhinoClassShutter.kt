@@ -86,11 +86,9 @@ object RhinoClassShutter : ClassShutter {
             "java.util.concurrent.ScheduledThreadPoolExecutor",
             "java.util.concurrent.ForkJoinPool",
             "java.util.concurrent.CompletableFuture",
-            // 直接发网络请求会绕过内网防护（NetworkGuard 只作用于引擎的 OkHttp）；
-            // 保留 URLEncoder / URLDecoder / URI（前缀匹配需要 '.' 或完全相等，不会误伤）
-            "java.net.URL",
-            "java.net.URLConnection",
-            "java.net.HttpURLConnection",
+            // 直接发网络请求会绕过内网防护（NetworkGuard 只作用于引擎的 OkHttp）。
+            // 注意：java.net.URL / URLConnection 不整类屏蔽——书源常用 URL 解析地址（importClass(java.net.URL)），
+            // 屏蔽整类会破坏书源；改为在包装实例时屏蔽 openConnection / openStream 等发请求的方法（见 RhinoWrapFactory）
             "java.net.Socket",
             "java.net.ServerSocket",
             "java.net.DatagramSocket",
@@ -170,9 +168,8 @@ object RhinoClassShutter : ClassShutter {
             okio.Path::class.java,
             FileSystem::class.java,
             Path::class.java,
-            // 即使通过别的途径拿到实例（如 new java.net.URI(..).toURL()）也挡住
-            java.net.URL::class.java,
-            java.net.URLConnection::class.java,
+            // 即使通过别的途径拿到实例（如 new java.lang.Thread(..)）也挡住。
+            // URL / URLConnection 不在此列：它们由 RhinoWrapFactory 包装并屏蔽发请求的方法，解析仍可用
             java.net.Socket::class.java,
             java.net.ServerSocket::class.java,
             Thread::class.java,
@@ -192,8 +189,6 @@ object RhinoClassShutter : ClassShutter {
             is okio.Path,
             is FileSystem,
             is Path,
-            is java.net.URL,
-            is java.net.URLConnection,
             is java.net.Socket,
             is java.net.ServerSocket,
             is Thread -> return false

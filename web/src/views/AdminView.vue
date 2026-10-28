@@ -284,30 +284,13 @@ async function saveSettings() {
               <div class="set-row">
                 <div class="set-text">
                   <div class="set-label">{{ t('注册方式') }}</div>
-                  <div class="set-desc">{{ t('邀请码注册时，新用户需要填写管理员或其他用户生成的邀请码') }}</div>
+                  <div class="set-desc">{{ t('邀请码注册时，新用户需要填写管理员生成的邀请码') }}</div>
                 </div>
                 <div class="set-control">
                   <n-radio-group v-model:value="settings.registrationMode" size="small">
                     <n-radio-button value="invite">{{ t('邀请码注册') }}</n-radio-button>
                     <n-radio-button value="closed">{{ t('关闭注册') }}</n-radio-button>
                   </n-radio-group>
-                </div>
-              </div>
-              <div class="set-row">
-                <div class="set-text">
-                  <div class="set-label">{{ t('允许用户生成邀请码') }}</div>
-                  <div class="set-desc">{{ t('普通用户可以在“我的”页面生成邀请码，邀请朋友注册') }}</div>
-                </div>
-                <div class="set-control">
-                  <n-switch :value="settings.allowUserInvite === 'true'" @update:value="(v: boolean) => (settings.allowUserInvite = String(v))" />
-                </div>
-              </div>
-              <div v-if="settings.allowUserInvite === 'true'" class="set-row sub">
-                <div class="set-text">
-                  <div class="set-label">{{ t('每个用户邀请码上限') }}</div>
-                </div>
-                <div class="set-control">
-                  <n-input-number :value="Number(settings.userInviteLimit || 0)" :min="0" size="small" class="num" @update:value="(v: number | null) => (settings.userInviteLimit = String(v ?? 0))" />
                 </div>
               </div>
             </div>
@@ -411,7 +394,7 @@ async function saveSettings() {
               </div>
               <div v-if="settings.remoteBrowserEnabled === 'true' && settings.browserAvailable === 'false'" class="set-row sub">
                 <n-alert type="warning" :bordered="false" class="set-alert">
-                  {{ t('没有设置浏览器调试地址，远程浏览器不会生效。启动一个浏览器（如 Docker 的 chromedp/headless-shell），把它的调试地址填到上面。') }}
+                  {{ t('没有设置浏览器调试地址，远程浏览器不会生效。') }}
                 </n-alert>
               </div>
             </div>

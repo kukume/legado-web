@@ -71,12 +71,12 @@ export interface SourceCheckResult {
   id: number
   name: string
   ok: boolean
-  /** 失败时加上的分组：搜索失效、详情失效、目录失效、正文失效、校验超时 */
-  group: string | null
+  /** 失败在哪一步：搜索失效、详情失效、目录失效、正文失效、校验超时 */
+  stage: string | null
   error: string | null
   time: number
-  /** 分组是否已写回书源（公共书源普通用户不能修改） */
-  saved: boolean
+  /** 当前用户能否删除这个书源（自己的书源，或管理员） */
+  editable: boolean
 }
 
 export type SourceCheckEvent =
@@ -318,6 +318,8 @@ export const dictApi = {
   list: () => http.get<{ rules: DictRule[]; canEdit: boolean }>('/api/dict-rules'),
   save: (rule: DictRule, oldName?: string) => http.post<DictRule>('/api/dict-rules', { rule, oldName }),
   remove: (names: string[]) => http.post('/api/dict-rules/delete', { names }),
+  /** 拖动排序：按顺序保存 */
+  saveOrder: (names: string[]) => http.post('/api/dict-rules/order', { names }),
   import: (json: string) => http.postRaw<{ count: number }>('/api/dict-rules/import', json),
   importDefaults: () => http.post('/api/dict-rules/defaults'),
   search: (name: string, word: string) => http.post<{ html: string; baseUrl: string | null }>('/api/dict-rules/search', { name, word }),
