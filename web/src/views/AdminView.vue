@@ -288,7 +288,6 @@ async function saveSettings() {
                 </div>
                 <div class="set-control">
                   <n-radio-group v-model:value="settings.registrationMode" size="small">
-                    <n-radio-button value="open">{{ t('开放注册') }}</n-radio-button>
                     <n-radio-button value="invite">{{ t('邀请码注册') }}</n-radio-button>
                     <n-radio-button value="closed">{{ t('关闭注册') }}</n-radio-button>
                   </n-radio-group>
@@ -636,6 +635,11 @@ async function saveSettings() {
   width: 100%;
 }
 
+/* 提示框占满整行，和上面的标题左对齐，不跟从属项一起缩进 */
+.set-row.sub:has(> .set-alert) {
+  padding-left: 18px;
+}
+
 .num {
   width: 120px;
 }
@@ -676,7 +680,8 @@ async function saveSettings() {
     padding: 12px 14px;
   }
 
-  .set-row.sub {
+  .set-row.sub,
+  .set-row.sub:has(> .set-alert) {
     padding-left: 14px;
   }
 

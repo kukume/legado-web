@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { computed, h, onActivated, onMounted, ref, watch } from 'vue'
+import { computed, h, nextTick, onActivated, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   NButton, NDropdown, NEmpty, NIcon, NInput, NModal, NSelect, NSpin, NTabs, NTab, NBadge, NTooltip,
-  NRadioGroup, NRadioButton, NAlert, NTag, NSpace, useDialog, useMessage,
+  NRadioGroup, NRadioButton, NAlert, NTag, NSpace, NCheckbox, useDialog, useMessage,
 } from 'naive-ui'
-import { RefreshOutline, SearchOutline, AddOutline, GridOutline, ListOutline, EllipsisVertical, CloudUploadOutline } from '@vicons/ionicons5'
+import Sortable from 'sortablejs'
+import {
+  RefreshOutline, SearchOutline, AddOutline, GridOutline, ListOutline, EllipsisVertical, CloudUploadOutline, SwapVerticalOutline,
+  CheckboxOutline, CheckmarkCircle,
+} from '@vicons/ionicons5'
 import BookCover from '@/components/BookCover.vue'
 import LocalBookUpload from '@/components/LocalBookUpload.vue'
 import { groupApi, shelfApi } from '@/api'
@@ -32,13 +36,188 @@ const offline = useOfflineStore()
 const offlineMode = ref(false)
 const viewMode = ref<'grid' | 'list'>((localStorage.getItem('legado_shelf_view') as any) || 'grid')
 
+// ---------- 排序（与 App 相同，按设备保存） ----------
+type SortMode = 'read' | 'update' | 'name' | 'manual'
+const sortMode = ref<SortMode>((localStorage.getItem('legado_shelf_sort') as SortMode) || 'read')
+const sortOptions = computed(() =>
+  (
+    [
+      { label: t('最近阅读'), key: 'read' },
+      { label: t('最近更新'), key: 'update' },
+      { label: t('书名'), key: 'name' },
+      { label: t('手动排序（拖动）'), key: 'manual' },
+    ] as const
+  ).map((o) => ({ ...o, icon: sortMode.value === o.key ? icon(CheckmarkCircle) : undefined })),
+)
+function setSort(k: SortMode) {
+  sortMode.value = k
+  try {
+    localStorage.setItem('legado_shelf_sort', k)
+  } catch {
+    /* 无法保存时只在本次生效 */
+  }
+}
+const collator = new Intl.Collator('zh-Hans-CN')
+function sortBooks(list: Book[]) {
+  const a = [...list]
+  switch (sortMode.value) {
+    case 'update':
+      return a.sort((x, y) => (y.latestChapterTime || y.lastCheckTime) - (x.latestChapterTime || x.lastCheckTime))
+    case 'name':
+      return a.sort((x, y) => collator.compare(x.name, y.name))
+    case 'manual':
+      return a.sort((x, y) => x.order - y.order || y.durChapterTime - x.durChapterTime)
+    default:
+      return a.sort((x, y) => y.durChapterTime - x.durChapterTime)
+  }
+}
+
 const shown = computed(() => {
   let list = books.value
   if (activeGroup.value >= 0) list = list.filter((b) => b.groupId === activeGroup.value)
   const f = filter.value.trim()
   if (f) list = list.filter((b) => b.name.includes(f) || b.author.includes(f))
-  return list
+  return sortBooks(list)
 })
+
+// ---------- 批量管理 ----------
+const selecting = ref(false)
+const selected = ref<Set<number>>(new Set())
+const allSelected = computed(() => shown.value.length > 0 && shown.value.every((b) => selected.value.has(b.id)))
+function toggleSelecting() {
+  selecting.value = !selecting.value
+  selected.value = new Set()
+}
+function toggleBook(b: Book) {
+  const s = new Set(selected.value)
+  if (s.has(b.id)) s.delete(b.id)
+  else s.add(b.id)
+  selected.value = s
+}
+function toggleAll(v: boolean) {
+  selected.value = v ? new Set(shown.value.map((b) => b.id)) : new Set()
+}
+const selectedBooks = () => books.value.filter((b) => selected.value.has(b.id))
+function onBookClick(b: Book) {
+  if (selecting.value) toggleBook(b)
+  else read(b)
+}
+
+/** 手动排序：拖动书籍调整顺序（筛选、批量管理、离线时不能拖动） */
+const gridEl = ref<HTMLElement | null>(null)
+const listEl = ref<HTMLElement | null>(null)
+const canDrag = computed(() => sortMode.value === 'manual' && !selecting.value && !filter.value.trim() && !offlineMode.value)
+let sortable: Sortable | null = null
+function setupSortable() {
+  sortable?.destroy()
+  sortable = null
+  const el = viewMode.value === 'grid' ? gridEl.value : listEl.value
+  if (!canDrag.value || !el) return
+  sortable = Sortable.create(el, {
+    animation: 150,
+    // 手机上长按后才拖动，不影响滚动
+    delay: 250,
+    delayOnTouchOnly: true,
+    ghostClass: 'drag-ghost',
+    onEnd: (e) => {
+      const { oldIndex, newIndex, from, item } = e
+      if (oldIndex == null || newIndex == null || oldIndex === newIndex) return
+      // 把 DOM 还原，交给 Vue 按新的数据重新渲染
+      from.insertBefore(item, from.children[oldIndex > newIndex ? oldIndex + 1 : oldIndex] ?? null)
+      moveBook(oldIndex, newIndex)
+    },
+  })
+}
+watch([canDrag, viewMode, () => shown.value.length], () => nextTick(setupSortable))
+onBeforeUnmount(() => sortable?.destroy())
+
+async function moveBook(from: number, to: number) {
+  const visible = [...shown.value]
+  const [moved] = visible.splice(from, 1)
+  visible.splice(to, 0, moved)
+  // 只调整当前显示的书（某个分组）之间的顺序，其他书的位置不变
+  const all = sortBooks(books.value)
+  const visibleIds = new Set(visible.map((v) => v.id))
+  const slots = all.map((b, i) => (visibleIds.has(b.id) ? i : -1)).filter((i) => i >= 0)
+  slots.forEach((slot, k) => (all[slot] = visible[k]))
+  all.forEach((b, i) => (b.order = i))
+  try {
+    await shelfApi.saveOrder(all.map((b) => b.id))
+  } catch (e: any) {
+    message.error(e.message)
+  }
+}
+
+const batchMove = ref(false)
+const batchGroup = ref(0)
+const batchBusy = ref(false)
+async function doBatchMove() {
+  const list = selectedBooks()
+  batchBusy.value = true
+  try {
+    for (const b of list) Object.assign(b, await shelfApi.update(b.id, { groupId: batchGroup.value }))
+    message.success(t('已移动 {0} 本书', [list.length]))
+    batchMove.value = false
+  } catch (e: any) {
+    message.error(e.message)
+  } finally {
+    batchBusy.value = false
+  }
+}
+
+async function batchRefresh() {
+  const queue = [...selectedBooks()]
+  batchBusy.value = true
+  let ok = 0
+  let fail = 0
+  try {
+    // 同时更新 3 本
+    await Promise.all(
+      Array.from({ length: Math.min(3, queue.length) }, async () => {
+        for (let b = queue.shift(); b; b = queue.shift()) {
+          try {
+            Object.assign(b, await shelfApi.refresh(b.id))
+            ok++
+          } catch {
+            fail++
+          }
+        }
+      }),
+    )
+    if (fail) message.warning(t('已更新 {0} 本，{1} 本失败', [ok, fail]))
+    else message.success(t('已更新 {0} 本书的目录', [ok]))
+  } finally {
+    batchBusy.value = false
+  }
+}
+
+function batchDownload() {
+  const list = selectedBooks().filter((b) => !b.isAudio && !b.isVideo)
+  if (!list.length) return message.warning(t('音频、视频不能离线下载'))
+  // 依次在后台下载，进度在“我的 → 离线阅读”中查看
+  void (async () => {
+    for (const b of list) await offline.download(b.id).catch(() => {})
+  })()
+  message.success(t('已开始离线下载 {0} 本书，进度可以在“我的 → 离线阅读”中查看', [list.length]))
+}
+
+function batchRemove() {
+  const list = selectedBooks()
+  dialog.warning({
+    title: t('移出书架'),
+    content: t('确定删除选中的 {0} 本书吗？阅读进度和缓存会一并删除，上传的本地书籍会删除文件。', [list.length]),
+    positiveText: t('删除'),
+    negativeText: t('取消'),
+    onPositiveClick: async () => {
+      for (const b of list) {
+        await shelfApi.remove(b.id).catch(() => {})
+        books.value = books.value.filter((x) => x.id !== b.id)
+      }
+      selected.value = new Set()
+      if (list.some((b) => b.isLocal)) loadLocalInfo()
+    },
+  })
+}
 
 // ---------- 本地书籍导入 ----------
 const localInfo = ref<LocalBookInfo | null>(null)
@@ -241,6 +420,10 @@ const icon = (c: any) => () => h(NIcon, null, { default: () => h(c) })
       <n-input v-model:value="filter" :placeholder="t('筛选书名 / 作者')" clearable size="small" style="max-width: 200px">
         <template #prefix><n-icon :component="SearchOutline" /></template>
       </n-input>
+      <n-dropdown v-if="!offlineMode" trigger="click" :options="sortOptions" @select="setSort">
+        <n-button size="small" :render-icon="icon(SwapVerticalOutline)" :title="t('排序')" />
+      </n-dropdown>
+      <n-button v-if="!offlineMode" size="small" :type="selecting ? 'primary' : 'default'" :render-icon="icon(CheckboxOutline)" :title="t('批量管理')" @click="toggleSelecting" />
       <n-radio-group :value="viewMode" size="small" @update:value="setView">
         <n-radio-button value="grid"><n-icon :component="GridOutline" /></n-radio-button>
         <n-radio-button value="list"><n-icon :component="ListOutline" /></n-radio-button>
@@ -269,6 +452,18 @@ const icon = (c: any) => () => h(NIcon, null, { default: () => h(c) })
       <n-button text size="small" class="muted" @click="showGroups = true">{{ t('管理分组') }}</n-button>
     </div>
 
+    <div v-if="selecting" class="batch-bar">
+      <n-checkbox :checked="allSelected" :indeterminate="!allSelected && selected.size > 0" @update:checked="toggleAll">{{ t('全选') }}</n-checkbox>
+      <span class="muted small">{{ t('已选 {0} 本', [selected.size]) }}</span>
+      <div style="flex: 1" />
+      <n-button size="small" :disabled="!selected.size || batchBusy" @click="batchGroup = 0; batchMove = true">{{ t('移动分组') }}</n-button>
+      <n-button size="small" :disabled="!selected.size" :loading="batchBusy" @click="batchRefresh">{{ t('更新目录') }}</n-button>
+      <n-button size="small" :disabled="!selected.size || batchBusy" @click="batchDownload">{{ t('离线下载') }}</n-button>
+      <n-button size="small" type="error" ghost :disabled="!selected.size || batchBusy" @click="batchRemove">{{ t('删除') }}</n-button>
+      <n-button size="small" type="primary" @click="toggleSelecting">{{ t('完成') }}</n-button>
+    </div>
+    <div v-else-if="canDrag" class="muted small drag-hint">{{ t('手动排序：拖动书籍调整顺序（手机上长按后拖动）') }}</div>
+
     <n-alert v-if="offlineMode" type="info" :bordered="false" style="margin-bottom: 12px">
       {{ t('当前离线，只显示本机已离线下载的书；联网后会自动同步阅读进度') }}
     </n-alert>
@@ -283,8 +478,9 @@ const icon = (c: any) => () => h(NIcon, null, { default: () => h(c) })
         </template>
       </n-empty>
 
-      <div v-if="viewMode === 'grid'" class="grid">
-        <div v-for="b in shown" :key="b.id" class="grid-item" @click="read(b)">
+      <div v-if="viewMode === 'grid'" ref="gridEl" class="grid">
+        <div v-for="b in shown" :key="b.id" class="grid-item" :class="{ selected: selected.has(b.id) }" @click="onBookClick(b)">
+          <span v-if="selecting" class="check-mark"><n-icon :component="CheckmarkCircle" /></span>
           <n-badge :value="b.lastCheckCount || unread(b)" :max="999" :show="unread(b) > 0" :type="b.lastCheckCount ? 'error' : 'info'" :offset="[-14, 6]">
             <book-cover :url="b.customCoverUrl || b.coverUrl" :name="b.name" :author="b.author" :origin="b.origin" />
           </n-badge>
@@ -292,7 +488,7 @@ const icon = (c: any) => () => h(NIcon, null, { default: () => h(c) })
           <div class="grid-sub muted ellipsis">
             <span v-if="b.isLocal" class="offline-mark local-mark">{{ t('本地') }}</span><span v-if="offline.bookIds.has(b.id)" class="offline-mark">{{ t('离线') }}</span>{{ progressText(b) }} · {{ b.author }}
           </div>
-          <n-dropdown trigger="click" :options="menuFor(b)" @select="(k: string) => onMenu(k, b)">
+          <n-dropdown v-if="!selecting" trigger="click" :options="menuFor(b)" @select="(k: string) => onMenu(k, b)">
             <button class="more" @click.stop>
               <n-icon :component="EllipsisVertical" />
             </button>
@@ -300,8 +496,9 @@ const icon = (c: any) => () => h(NIcon, null, { default: () => h(c) })
         </div>
       </div>
 
-      <div v-else class="list">
-        <div v-for="b in shown" :key="b.id" class="list-item card" @click="read(b)">
+      <div v-else ref="listEl" class="list">
+        <div v-for="b in shown" :key="b.id" class="list-item card" :class="{ selected: selected.has(b.id) }" @click="onBookClick(b)">
+          <n-checkbox v-if="selecting" :checked="selected.has(b.id)" @click.stop @update:checked="toggleBook(b)" />
           <book-cover :url="b.customCoverUrl || b.coverUrl" :name="b.name" :origin="b.origin" :width="64" />
           <div class="list-body">
             <div class="list-title">
@@ -315,7 +512,7 @@ const icon = (c: any) => () => h(NIcon, null, { default: () => h(c) })
             <div v-if="b.isLocal" class="muted ellipsis small">{{ t('共 {0} 章', [b.totalChapterNum]) }}</div>
             <div v-else class="muted ellipsis small">{{ t('最新：{0} · {1}', [b.latestChapterTitle || '-', formatTime(b.lastCheckTime)]) }}</div>
           </div>
-          <n-dropdown trigger="click" :options="menuFor(b)" @select="(k: string) => onMenu(k, b)">
+          <n-dropdown v-if="!selecting" trigger="click" :options="menuFor(b)" @select="(k: string) => onMenu(k, b)">
             <n-button quaternary circle size="small" :render-icon="icon(EllipsisVertical)" @click.stop />
           </n-dropdown>
         </div>
@@ -335,6 +532,11 @@ const icon = (c: any) => () => h(NIcon, null, { default: () => h(c) })
     <n-modal :show="!!moveTarget" preset="dialog" :title="t('移动分组')" :positive-text="t('确定')" :negative-text="t('取消')"
       @positive-click="doMove" @update:show="(v: boolean) => !v && (moveTarget = null)">
       <n-select v-model:value="moveGroup" :options="groupOptions" />
+    </n-modal>
+
+    <n-modal v-model:show="batchMove" preset="dialog" :title="t('移动分组')" :positive-text="t('确定')" :negative-text="t('取消')"
+      :loading="batchBusy" @positive-click="doBatchMove">
+      <n-select v-model:value="batchGroup" :options="groupOptions" />
     </n-modal>
 
     <n-modal v-model:show="showGroups" preset="card" :title="t('分组管理')" style="max-width: 420px">
@@ -480,6 +682,50 @@ const icon = (c: any) => () => h(NIcon, null, { default: () => h(c) })
 
 .small {
   font-size: 12.5px;
+}
+
+.batch-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--app-surface);
+  border: 1px solid var(--app-border);
+}
+
+.drag-hint {
+  margin: -6px 0 12px;
+}
+
+.check-mark {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  display: flex;
+  font-size: 22px;
+  color: rgba(255, 255, 255, 0.85);
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
+}
+
+.grid-item.selected .check-mark {
+  color: var(--app-accent);
+}
+
+.grid-item.selected :deep(.cover) {
+  outline: 3px solid var(--app-accent);
+  outline-offset: 2px;
+}
+
+.list-item.selected {
+  outline: 2px solid var(--app-accent);
+}
+
+.drag-ghost {
+  opacity: 0.4;
 }
 
 .group-row {

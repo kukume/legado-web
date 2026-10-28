@@ -1,5 +1,6 @@
 package io.legado.web.service
 
+import io.legado.web.security.ScriptUrls
 import io.legado.app.utils.NetworkUtils
 import io.legado.app.help.http.CookieStore
 import java.io.StringReader
@@ -271,6 +272,7 @@ class SourceConfigService(private val sourceService: SourceService) {
      * 段评、本章说等通过 java.showBrowser 打开的网页会推送到页面以底部弹窗显示。
      */
     suspend fun clickImage(user: UserPrincipal, source: BookSource, book: Book, chapter: BookChapter, src: String): ActionResult {
+        sourceService.requireTrustedUrls(user, src)
         val matcher = AnalyzeUrl.paramPattern.matcher(src)
         if (!matcher.find()) return ActionResult(false, "该图片没有点击操作", null)
         val urlNoOption = src.substring(0, matcher.start())
@@ -411,6 +413,7 @@ class SourceConfigService(private val sourceService: SourceService) {
             val views = kinds.map { k -> k.toView(src, infoMap) }
             // 与 App 一致：toggle/select 没有值时写入默认值
             if (infoMap.needSave) infoMap.saveNow()
+            ScriptUrls.remember(user.id, views.map { it.url })
             ExploreKindsResult(views, infoMap.get().toMap())
         }
     }

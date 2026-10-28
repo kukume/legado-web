@@ -32,6 +32,7 @@ class ProxyService(
         cover: Boolean,
     ): ProxiedImage {
         if (!url.startsWith("http", true) && !url.isDataUrl()) throw BadRequestException("图片地址无效")
+        sourceService.requireTrustedUrls(user, url)
         val book: Book? = bookId?.let { runCatching { shelfService.engineBook(user, it) }.getOrNull() }
         val stored = sourceId?.let { runCatching { sourceService.get(user, it) }.getOrNull() }
             ?: (origin ?: book?.origin)?.let { sourceService.findByUrl(user, it) }

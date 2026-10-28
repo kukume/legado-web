@@ -1,5 +1,6 @@
 package io.legado.web.service
 
+import io.legado.web.security.ScriptUrls
 import io.legado.app.constant.BookType
 import io.legado.app.data.entities.Book
 import io.legado.app.data.entities.BookSource
@@ -403,6 +404,9 @@ class BackupService(
         }
         var local = 0
         val now = System.currentTimeMillis()
+        // 书籍地址里带脚本的（会在打开时执行）：没有添加书源权限的用户不导入，见 ScriptUrls
+        val canScript = sourceService.canAddSource(user)
+        var scripted = 0
         dbQuery {
             val existing = Books.selectAll().where { Books.userId eq user.id }
                 .associateBy { it[Books.bookUrl] }
@@ -411,6 +415,10 @@ class BackupService(
                 // 本地书（txt/epub 等）只存在于手机上，网页版无法打开
                 if (b.origin == BookType.localTag || b.origin.startsWith(BookType.webDavTag) || b.type and BookType.local != 0) {
                     local++
+                    return@forEach
+                }
+                if (!canScript && listOf(b.bookUrl, b.tocUrl, b.coverUrl, b.customCoverUrl).any { ScriptUrls.hasScript(it) }) {
+                    scripted++
                     return@forEach
                 }
                 // App 的 group 是按位或，取第一个能对应上的分组
@@ -474,6 +482,7 @@ class BackupService(
             }
         }
         if (local > 0) s.warnings.add("跳过了 $local 本本地书籍（本地文件只在手机上，网页版无法打开）")
+        if (scripted > 0) s.warnings.add("跳过了 $scripted 本地址中含有脚本的书籍（需要“添加书源”的权限）")
     }
 
     private suspend fun importDictRules(user: UserPrincipal, json: String, s: ImportSummary) {

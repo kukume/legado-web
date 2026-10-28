@@ -23,6 +23,17 @@ data class ContentRule(
     var maxBatchSize: Int? = null      //最大批量数量，默认null表示不支持批量
 ) {
 
+    override fun toString(): String = buildString {
+        // Rhino 用这段文本做 JSON.stringify(rule)，旧书源会拿它算校验值；没配批量规则时保持旧格式
+        append("ContentRule(content=$content, subContent=$subContent, title=$title, ")
+        append("nextContentUrl=$nextContentUrl, webJs=$webJs, sourceRegex=$sourceRegex, ")
+        append("replaceRegex=$replaceRegex, imageStyle=$imageStyle, imageDecode=$imageDecode, ")
+        append("payAction=$payAction, callBackJs=$callBackJs")
+        if (contentBatch != null || maxBatchSize != null) {
+            append(", contentBatch=$contentBatch, maxBatchSize=$maxBatchSize")
+        }
+        append(')')
+    }
 
     companion object {
 

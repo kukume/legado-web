@@ -20,7 +20,7 @@ export interface Me {
 
 export interface PublicConfig {
   siteName: string
-  registrationMode: 'open' | 'invite' | 'closed'
+  registrationMode: 'invite' | 'closed'
   hasUsers: boolean
   /** 登录、注册需要的人机验证；null 表示不需要 */
   captcha: { provider: 'cap'; endpoint: string } | null
@@ -129,9 +129,10 @@ export interface Book {
   isVideo?: boolean
   /** 图片（漫画，图片书源） */
   isImage?: boolean
-  /** 正文处理（按书保存）：重新分段、删除重复标题 */
+  /** 正文处理（按书保存）：重新分段、删除重复标题、替换净化（使用替换规则） */
   reSegment?: boolean
   removeSameTitle?: boolean
+  useReplaceRule?: boolean
 }
 
 export interface TtsEngine {

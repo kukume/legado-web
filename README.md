@@ -4,7 +4,7 @@
 
 - **后端**：Kotlin + Ktor 3 + Exposed 1.x，数据库支持 **SQLite / PostgreSQL**
 - **前端**：Vue 3 + Vite + TypeScript + Pinia + Naive UI
-- **书源引擎**：移植自 LegadoTeam/legado（master，2026-09），兼容阅读 3.0 书源 JSON 与纯 JS 书源
+- **书源引擎**：移植自 LegadoTeam/legado（引擎修复同步到`531f9fbf`），兼容阅读 3.0 书源 JSON 与纯 JS 书源
 - **本地书籍**：上传 EPUB、TXT、MOBI、AZW3、AZW、UMD、PDF
 - **规则**：替换规则、字典规则（阅读时选中文字 → 字典）、TXT 目录规则（上传 TXT 时自动分章，也可为单本书指定规则）
 - **备份与恢复**：支持与阅读 App 的备份 zip 互通，可恢复 App 备份中的书架（含进度、分组、书签）、书源、替换规则、字典规则、TXT 目录规则、书源订阅，导出的 zip 也能在 App 中恢复；支持 WebDAV。

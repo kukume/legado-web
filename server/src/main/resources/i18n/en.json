@@ -224,5 +224,14 @@
   "Content-Type 不是有效的正则表达式": "Content-Type is not a valid regular expression",
   "已有同名的朗读引擎": "A TTS engine with this name already exists",
   "没有编辑朗读引擎的权限（与添加书源的权限相同）": "You don't have permission to edit TTS engines (same as adding sources)",
-  "开发版没有构建时间，无法检查更新": "Development builds have no build time, so updates can't be checked"
+  "开发版没有构建时间，无法检查更新": "Development builds have no build time, so updates can't be checked",
+  "不是字体文件（支持 TTF、OTF、WOFF、WOFF2、TTC）": "Not a font file (TTF, OTF, WOFF, WOFF2 and TTC are supported)",
+  "最多上传 10 个字体，请先删除不用的": "You can upload at most 10 fonts; delete unused ones first",
+  "字体不存在": "Font not found",
+  "字体文件过大（最大 30MB）": "Font file too large (max 30MB)",
+  "目录为空": "The table of contents is empty",
+  "正文为空": "The content is empty",
+  "书源没有搜索和发现地址": "The source has neither a search nor an explore URL",
+  "书源没有搜索，跳过校验": "The source has no search; skipped",
+  "请先勾选书源": "Select some sources first"
 }

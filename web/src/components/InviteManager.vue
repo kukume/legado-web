@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { h, onMounted, ref } from 'vue'
 import {
-  NButton, NDataTable, NInput, NInputNumber, NModal, NSpace, NSwitch, NTag, useMessage, type DataTableColumns,
+  NAlert, NButton, NDataTable, NInput, NInputNumber, NModal, NSpace, NSwitch, NTag, useMessage, type DataTableColumns,
 } from 'naive-ui'
 import { inviteApi } from '@/api'
 import type { Invite } from '@/api/types'
@@ -96,6 +96,9 @@ const columns: DataTableColumns<Invite> = [
     <n-data-table :columns="columns" :data="invites" :loading="loading" size="small" :scroll-x="700" :pagination="{ pageSize: 20 }" />
     <n-modal v-model:show="show" preset="card" :title="t('生成邀请码')" style="max-width: 420px">
       <n-space vertical>
+        <n-alert type="warning" :bordered="false" :show-icon="true">
+          {{ t('被邀请的人注册后，一旦获得「添加书源」权限，就能让服务器运行自定义脚本（书源本质是可执行的 JavaScript），存在较高安全风险。请只邀请你信任的人，并谨慎开放添加书源权限。') }}
+        </n-alert>
         <template v-if="admin">
           <label class="small">{{ t('数量') }} <n-input-number v-model:value="form.count" :min="1" :max="100" size="small" /></label>
           <label class="small">{{ t('每个可用次数（0 为不限）') }} <n-input-number v-model:value="form.maxUses" :min="0" size="small" /></label>

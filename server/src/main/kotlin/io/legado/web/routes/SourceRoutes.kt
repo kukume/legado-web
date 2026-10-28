@@ -48,12 +48,14 @@ data class ExploreActionBody(
 )
 data class SubscriptionRequest(val name: String = "", val url: String = "", val isPublic: Boolean = false, val autoUpdate: Boolean = true)
 data class SourceDetail(val id: Long, val isPublic: Boolean, val canEdit: Boolean, val source: BookSource)
+data class CheckRequest(val ids: List<Long> = emptyList(), val keyword: String? = null)
 
 fun Route.sourceRoutes(
     sourceService: SourceService,
     configService: SourceConfigService,
     searchService: SearchService,
     subscriptionService: SubscriptionService,
+    checkService: io.legado.web.service.SourceCheckService,
 ) {
     authenticate(AUTH_JWT) {
         route("/api/sources") {
@@ -81,6 +83,11 @@ fun Route.sourceRoutes(
                 val req = call.receive<ImportTextRequest>()
                 call.respond(sourceService.import(call.user, sourceService.parseAny(call.user, req.text), req.isPublic))
             }
+            post("/import-preview") {
+                val req = call.receive<ImportUrlRequest>()
+                val u = call.user
+                call.respond(sourceService.previewImport(u, sourceService.parseAny(u, sourceService.fetchText(req.url.trim()))))
+            }
             post("/import-url") {
                 val req = call.receive<ImportUrlRequest>()
                 call.respond(sourceService.importFromUrl(call.user, req.url, req.isPublic))
@@ -107,6 +114,18 @@ fun Route.sourceRoutes(
                 val req = call.receive<BatchRequest>()
                 sourceService.batch(call.user, req.ids, req.action, req.value)
                 call.respond(OkResponse())
+            }
+            /** 校验书源：每校验完一个推送一行结果（NDJSON） */
+            post("/check") {
+                val req = call.receive<CheckRequest>()
+                if (req.ids.isEmpty()) throw BadRequestException("请先勾选书源")
+                val u = call.user
+                call.respondNdjson { emit ->
+                    checkService.check(u, req.ids, req.keyword) { done, total, r ->
+                        emit(mapOf("type" to "result", "done" to done, "total" to total, "result" to r))
+                    }
+                    emit(mapOf("type" to "end"))
+                }
             }
 
             // ---- 书源登录 / 配置（按用户保存） ----
@@ -189,6 +208,8 @@ fun Route.sourceRoutes(
                 else -> throw BadRequestException("缺少书源")
             }
             if (req.key.isBlank()) throw BadRequestException("调试关键字不能为空")
+            // 调试关键字可以是书籍、目录、正文、发现地址：带脚本的需要添加书源的权限
+            if (req.source.isNullOrBlank()) sourceService.requireTrustedUrls(u, req.key)
             call.respondNdjson { emit ->
                 val channel = kotlinx.coroutines.channels.Channel<Pair<Int, String>>(kotlinx.coroutines.channels.Channel.UNLIMITED)
                 kotlinx.coroutines.coroutineScope {

@@ -1,5 +1,6 @@
 package io.legado.web.service
 
+import io.legado.web.security.ScriptUrls
 import io.legado.app.constant.BookType
 import io.legado.app.data.entities.BookSource
 import io.legado.app.data.entities.Book
@@ -78,9 +79,10 @@ data class BookDto(
     val isVideo: Boolean = false,
     /** 图片（漫画，来自图片书源，正文是图片） */
     val isImage: Boolean = false,
-    /** 正文处理（按书保存，与 App 的 readConfig 相同）：重新分段、删除重复标题 */
+    /** 正文处理（按书保存，与 App 的 readConfig 相同）：重新分段、删除重复标题、替换净化 */
     val reSegment: Boolean = false,
     val removeSameTitle: Boolean = true,
+    val useReplaceRule: Boolean = true,
 )
 
 data class ChapterDto(
@@ -215,7 +217,10 @@ class ShelfService(
         isImage = this[Books.type] and io.legado.app.constant.BookType.image != 0,
     ).let { dto ->
         val rc = readConfigOf(this)
-        if (rc == null) dto else dto.copy(reSegment = rc.reSegment, removeSameTitle = rc.removeSameTitle)
+        // 替换净化没设置时：漫画关闭、其他开启（与 ReplaceRuleService.useReplaceRule 相同）
+        val replace = rc?.useReplaceRule ?: !dto.isImage
+        if (rc == null) dto.copy(useReplaceRule = replace)
+        else dto.copy(reSegment = rc.reSegment, removeSameTitle = rc.removeSameTitle, useReplaceRule = replace)
     }
 
     private fun readConfigOf(row: ResultRow): Book.ReadConfig? =
@@ -284,6 +289,7 @@ class ShelfService(
      */
     suspend fun open(user: UserPrincipal, req: OpenBookRequest): BookDto {
         if (req.bookUrl.isBlank()) throw BadRequestException("bookUrl 不能为空")
+        sourceService.requireTrustedUrls(user, req.bookUrl, req.tocUrl, req.coverUrl)
         val existing = dbQuery {
             Books.selectAll().where { (Books.userId eq user.id) and (Books.bookUrl eq req.bookUrl) }.firstOrNull()
         }
@@ -502,7 +508,10 @@ class ShelfService(
     /**
      * 获取章节正文（优先缓存）
      */
-    suspend fun content(user: UserPrincipal, bookId: Long, index: Int, refresh: Boolean): ContentDto {
+    suspend fun content(user: UserPrincipal, bookId: Long, index: Int, refresh: Boolean): ContentDto =
+        loadContent(user, bookId, index, refresh).also { ScriptUrls.rememberContentImages(user.id, it.content) }
+
+    private suspend fun loadContent(user: UserPrincipal, bookId: Long, index: Int, refresh: Boolean): ContentDto {
         val row = bookRow(user, bookId)
         val book = row.toEngineBook()
         val chapterRow = dbQuery {
@@ -775,16 +784,19 @@ class ShelfService(
         val order: Int? = null,
         val reSegment: Boolean? = null,
         val removeSameTitle: Boolean? = null,
+        val useReplaceRule: Boolean? = null,
     )
 
     suspend fun update(user: UserPrincipal, bookId: Long, u: BookUpdate): BookDto {
         val row = bookRow(user, bookId)
+        sourceService.requireTrustedUrls(user, u.customCoverUrl)
         // 正文处理开关写进 readConfig（按 JSON 合并，保留 App 备份里其他的字段）
-        val readConfig = if (u.reSegment == null && u.removeSameTitle == null) null else {
+        val readConfig = if (u.reSegment == null && u.removeSameTitle == null && u.useReplaceRule == null) null else {
             val obj = row[Books.readConfig]?.let { runCatching { com.google.gson.JsonParser.parseString(it).asJsonObject }.getOrNull() }
                 ?: com.google.gson.JsonObject()
             u.reSegment?.let { obj.addProperty("reSegment", it) }
             u.removeSameTitle?.let { obj.addProperty("removeSameTitle", it) }
+            u.useReplaceRule?.let { obj.addProperty("useReplaceRule", it) }
             obj.toString()
         }
         dbQuery {
@@ -801,6 +813,15 @@ class ShelfService(
             }
         }
         return getBook(user, bookId)
+    }
+
+    /** 书架手动排序：按 [ids] 的顺序写入 order（只修改自己的书） */
+    suspend fun saveOrder(user: UserPrincipal, ids: List<Long>) {
+        dbQuery {
+            ids.forEachIndexed { i, id ->
+                Books.update({ (Books.id eq id) and (Books.userId eq user.id) }) { it[order] = i }
+            }
+        }
     }
 
     suspend fun delete(user: UserPrincipal, bookId: Long) {
@@ -821,6 +842,7 @@ class ShelfService(
         val row = bookRow(user, bookId)
         val old = row.toEngineBook()
         if (LocalBookService.isLocal(old.origin)) throw BadRequestException("本地书籍不能换源")
+        sourceService.requireTrustedUrls(user, req.bookUrl, req.tocUrl, req.coverUrl)
         val stored = (req.sourceId?.let { runCatching { sourceService.get(user, it) }.getOrNull() }
             ?: sourceService.findByUrl(user, req.origin))
             ?: throw NotFoundException("书源不存在")

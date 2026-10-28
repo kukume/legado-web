@@ -136,6 +136,8 @@ class RemoteBrowserManager(
         val headers: Map<String, String> = emptyMap(),
         /** 该网站已有的 Cookie（a=1; b=2） */
         val cookie: String? = null,
+        /** 书源地址：网页只能在书源和打开的网页所在的网站（含子域名）内跳转，见 [SiteScope] */
+        val sourceUrl: String? = null,
     )
 
     suspend fun open(req: OpenRequest): RemoteSession {
@@ -204,6 +206,12 @@ class RemoteSession internal constructor(
 
     private val listener: (String, JsonObject) -> Unit = { method, params -> onEvent(method, params) }
 
+    /**
+     * 网页只能在书源的网站内跳转（防止点了外链去浏览其他网站）：书源地址和打开的网页所在的可注册域名及其子域名。
+     * 只限制主页面的跳转；网页加载的图片、脚本、接口和内嵌框架（如人机验证）不限制
+     */
+    private val siteScope = SiteScope(listOf(req.sourceUrl, req.url))
+
     /** 第一个页面请求要换成 POST（书源格式的网址带 method / body 时） */
     private val firstDocument = AtomicBoolean(true)
 
@@ -230,7 +238,7 @@ class RemoteSession internal constructor(
         }
         applyViewport()
         setCookies()
-        // 拦截请求：第一个页面请求按书源的方式发（POST）；其余请求做内网防护检查
+        // 拦截请求：第一个页面请求按书源的方式发（POST）；主页面跳转限制在书源的网站内；其余请求做内网防护检查
         cmd("Fetch.enable", JsonObject().apply {
             add("patterns", JsonArray().apply { add(JsonObject().apply { addProperty("urlPattern", "*") }) })
         })
@@ -323,6 +331,16 @@ class RemoteSession internal constructor(
             return
         }
         if (isDocument) firstDocument.set(false)
+        // 页面目标的主框架 id 就是 targetId；内嵌框架的跳转不限制
+        if (isDocument && params.get("frameId")?.asString == targetId && !siteScope.allows(reqUrl)) {
+            // Aborted：放弃这次跳转，停留在当前网页（其他错误原因会显示浏览器的错误页）
+            cmdAsync("Fetch.failRequest", JsonObject().apply {
+                addProperty("requestId", requestId)
+                addProperty("errorReason", "Aborted")
+            })
+            events.trySend("blocked" to (runCatching { java.net.URI(reqUrl).host }.getOrNull() ?: reqUrl))
+            return
+        }
         if (!NetworkGuard.isEnabled) {
             cmdAsync("Fetch.continueRequest", JsonObject().apply { addProperty("requestId", requestId) })
             return

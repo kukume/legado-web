@@ -1,4 +1,7 @@
 ktor:
+  # IDEA 的 Ktor 运行配置默认打开开发模式（自动重载），会用另一个类加载器重新加载项目的类，
+  # 和 Rhino（htmlunit-core-js）的包内接口冲突，执行 JS 时报 IllegalAccessError。这里固定关闭
+  development: "$KTOR_DEVELOPMENT:false"
   deployment:
     port: "$PORT:8080"
     host: "$HOST:0.0.0.0"

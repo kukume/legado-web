@@ -65,9 +65,12 @@ defineEmits<{
 
 <style scoped>
 .chapter-title {
-  font-size: 1.4em;
+  /* 标题样式由阅读设置控制（--r-title-*，见 ReaderView） */
+  display: var(--r-title-display, block);
+  text-align: var(--r-title-align, left);
+  font-size: var(--r-title-size, 1.4em);
   font-weight: 700;
-  margin: 0.4em 0 1.2em;
+  margin: var(--r-title-top, 0.4em) 0 var(--r-title-bottom, 1.2em);
   line-height: 1.4;
   letter-spacing: 0.02em;
 }

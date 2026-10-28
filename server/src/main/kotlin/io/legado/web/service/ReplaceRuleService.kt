@@ -147,12 +147,14 @@ class ReplaceRuleService {
 
     /**
      * 正文处理，顺序与 App 的 ContentProcessor 相同：删除重复标题 → 重新分段 → 替换规则。
-     * 删除重复标题默认开启、重新分段默认关闭，都按书保存在 readConfig 里
+     * 删除重复标题默认开启、重新分段默认关闭，都按书保存在 readConfig 里。
+     * 替换规则按书开关（readConfig.useReplaceRule，与 App 相同）：没设置时漫画关闭、其他开启
      */
     suspend fun apply(userId: Long, book: Book, title: String, content: String): String {
         val config = book.readConfig
         var text = if (config?.removeSameTitle != false) removeSameTitle(book.name, title, content) else content
         if (config?.reSegment == true && book.type and BookType.image == 0) text = reSegment(text, title)
+        if (!useReplaceRule(book)) return text
         val rules = enabledRules(userId).filter { it.scopeContent && inScope(it, book) }
         for (rule in rules) {
             text = try {
@@ -169,6 +171,9 @@ class ReplaceRuleService {
         }
         return text
     }
+
+    fun useReplaceRule(book: Book): Boolean =
+        book.readConfig?.useReplaceRule ?: (book.type and BookType.image == 0)
 
     /**
      * 删除正文开头与章节名相同的一行，与 App 的 sameTitleLineMatcher 相同：

@@ -10,7 +10,9 @@ import {
 } from 'naive-ui'
 import { AddOutline, CloudDownloadOutline, CloudUploadOutline, SearchOutline, KeyOutline, CreateOutline, TrashOutline, RefreshOutline } from '@vicons/ionicons5'
 import SourceConfigModal from '@/components/SourceConfigModal.vue'
-import { sourceApi, subscriptionApi } from '@/api'
+import SourceCheckModal from '@/components/SourceCheckModal.vue'
+import SourceImportPreview from '@/components/SourceImportPreview.vue'
+import { sourceApi, subscriptionApi, type ImportPreviewItem } from '@/api'
 import type { ImportResult, SourceSummary, Subscription } from '@/api/types'
 import { useAuthStore } from '@/stores/auth'
 import { getToken } from '@/api/http'
@@ -219,6 +221,7 @@ const columns = computed<DataTableColumns<SourceSummary>>(() => isMobile.value ?
 
 // ---------- 批量操作 ----------
 const batchOptions = computed(() => [
+  { label: t('校验书源'), key: 'check' },
   { label: t('启用'), key: 'enable' },
   { label: t('禁用'), key: 'disable' },
   { label: t('启用发现'), key: 'enableExplore' },
@@ -230,6 +233,10 @@ const batchOptions = computed(() => [
   { label: t('删除'), key: 'delete' },
 ])
 
+// 校验书源：对话框里显示进度和结果，结束后刷新列表（分组有变化）
+const showCheck = ref(false)
+const checkIds = ref<number[]>([])
+
 const groupInput = ref('')
 const groupAction = ref<'addGroup' | 'removeGroup' | null>(null)
 
@@ -237,6 +244,11 @@ async function onBatch(key: string) {
   if (!checked.value.length) return message.warning(t('请先勾选书源'))
   if (key === 'delete') return remove(checked.value)
   if (key === 'export') return exportSources(checked.value)
+  if (key === 'check') {
+    checkIds.value = [...checked.value]
+    showCheck.value = true
+    return
+  }
   if (key === 'addGroup' || key === 'removeGroup') {
     groupAction.value = key
     groupInput.value = ''
@@ -271,6 +283,13 @@ const importUrl = ref('')
 const importText = ref('')
 const importPublic = ref(false)
 const importing = ref(false)
+/** 链接导入：先下载并列出书源，勾选后再导入 */
+const previewItems = ref<ImportPreviewItem[] | null>(null)
+const previewSelected = ref(new Set<number>())
+
+watch(showImport, (v) => {
+  if (!v) previewItems.value = null
+})
 
 function showResult(r: ImportResult) {
   const msg = t('新增 {0}，更新 {1}{2}', [r.added, r.updated, r.failed ? t('，失败 {0}', [r.failed]) : ''])
@@ -285,9 +304,19 @@ async function doImport() {
   importing.value = true
   try {
     let r: ImportResult
-    if (importTab.value === 'url') {
+    if (importTab.value === 'url' && !previewItems.value) {
       if (!importUrl.value.trim()) return message.warning(t('请输入链接'))
-      r = await sourceApi.importUrl(importUrl.value.trim(), importPublic.value)
+      const items = await sourceApi.importPreview(importUrl.value.trim())
+      if (!items.length) return message.warning(t('链接里没有书源'))
+      previewItems.value = items
+      previewSelected.value = new Set(items.map((_, i) => i))
+      return
+    }
+    if (importTab.value === 'url') {
+      const items = previewItems.value!
+      const picked = items.filter((_, i) => previewSelected.value.has(i))
+      if (!picked.length) return message.warning(t('请先勾选书源'))
+      r = await sourceApi.importText(`[${picked.map((i) => i.json).join(',')}]`, importPublic.value)
     } else {
       if (!importText.value.trim()) return message.warning(t('请粘贴书源 JSON'))
       r = await sourceApi.importText(importText.value, importPublic.value)
@@ -445,8 +474,11 @@ const statusOptions = [
     <n-modal v-model:show="showImport" preset="card" :title="t('导入书源')" style="max-width: 600px">
       <n-tabs v-model:value="importTab" type="segment">
         <n-tab-pane name="url" :tab="t('网络链接')">
-          <n-input v-model:value="importUrl" placeholder="https://example.com/bookSource.json" />
-          <p class="muted small">{{ t('支持阅读 3.0 书源 JSON（单个或数组）。需要定期同步请使用“订阅”。') }}</p>
+          <SourceImportPreview v-if="previewItems" v-model:selected="previewSelected" :items="previewItems" />
+          <template v-else>
+            <n-input v-model:value="importUrl" placeholder="https://example.com/bookSource.json" @keyup.enter="doImport" />
+            <p class="muted small">{{ t('支持阅读 3.0 书源 JSON（单个或数组）。下载后可以勾选要导入的书源。需要定期同步请使用“订阅”。') }}</p>
+          </template>
         </n-tab-pane>
         <n-tab-pane name="text" :tab="t('粘贴 / 文件')">
           <n-upload :show-file-list="false" accept=".json,.txt" :custom-request="() => {}" @change="onFile">
@@ -459,7 +491,12 @@ const statusOptions = [
         <n-space justify="space-between" align="center">
           <n-checkbox v-if="auth.isAdmin" v-model:checked="importPublic">{{ t('设为公共书源（所有用户可用）') }}</n-checkbox>
           <span v-else />
-          <n-button type="primary" :loading="importing" @click="doImport">{{ t('导入') }}</n-button>
+          <n-space :size="8">
+            <n-button v-if="importTab === 'url' && previewItems" :disabled="importing" @click="previewItems = null">{{ t('返回') }}</n-button>
+            <n-button type="primary" :loading="importing" @click="doImport">
+              {{ importTab === 'url' ? (previewItems ? t('导入选中 ({0})', [previewSelected.size]) : t('下一步')) : t('导入') }}
+            </n-button>
+          </n-space>
         </n-space>
       </template>
     </n-modal>
@@ -484,6 +521,7 @@ const statusOptions = [
     </n-modal>
 
     <source-config-modal v-model:show="showConfig" :source-id="configId" />
+    <source-check-modal v-model:show="showCheck" :ids="checkIds" @done="load" />
   </div>
 </template>
 

@@ -62,7 +62,14 @@ export const readerFonts = [
   { label: t('黑体'), value: 'sans' },
 ]
 
+/** 用户上传的字体：设置中保存为 custom:<id>，加载后注册为 legado-font-<id> */
+export const customFontId = (v: string) => (v.startsWith('custom:') ? Number(v.slice(7)) || null : null)
+export const customFontName = (id: number) => `legado-font-${id}`
+
 export function fontFamily(v: string) {
+  const id = customFontId(v)
+  // 字体还没加载完或已被删除时，用系统字体显示
+  if (id) return `"${customFontName(id)}", "PingFang SC", "Microsoft YaHei", sans-serif`
   switch (v) {
     case 'serif':
       return '"Noto Serif SC", "Source Han Serif SC", "Songti SC", SimSun, serif'
@@ -112,6 +119,13 @@ export interface ReaderConfig {
   autoScrollSpeed?: number
   /** 自动翻页间隔（秒，翻页模式） */
   autoPageSeconds?: number
+  /** 章节标题：left 居左；center 居中；hidden 隐藏（与 App 的标题设置相同） */
+  titleAlign?: 'left' | 'center' | 'hidden'
+  /** 标题字号（相对正文字号的倍数） */
+  titleSize?: number
+  /** 标题上、下间距（em） */
+  titleTop?: number
+  titleBottom?: number
   /** 设置版本，用于迁移旧的默认值 */
   version?: number
 }
@@ -139,6 +153,10 @@ const defaults: ReaderConfig = {
   doublePage: 'auto',
   autoScrollSpeed: 40,
   autoPageSeconds: 15,
+  titleAlign: 'left',
+  titleSize: 1.4,
+  titleTop: 0.4,
+  titleBottom: 1.2,
   version: 2,
 }
 

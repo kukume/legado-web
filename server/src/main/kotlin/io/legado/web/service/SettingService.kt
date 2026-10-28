@@ -14,7 +14,7 @@ import java.util.concurrent.ConcurrentHashMap
 class SettingService {
 
     companion object {
-        /** open: 开放注册；invite: 需要邀请码；closed: 关闭注册 */
+        /** invite: 需要邀请码；closed: 关闭注册（已取消开放注册，历史存的 open 视为 invite） */
         const val REGISTRATION_MODE = "registrationMode"
         /** 普通用户是否可以添加自己的书源（书源 JS 在服务器上执行，请谨慎开启） */
         const val ALLOW_USER_SOURCES = "allowUserSources"
@@ -74,11 +74,15 @@ class SettingService {
     private val cache = ConcurrentHashMap<String, String>()
 
     fun get(key: String): String {
-        cache[key]?.let { return it }
-        val v = dbBlocking {
-            Settings.selectAll().where { Settings.key eq key }.firstOrNull()?.get(Settings.value)
-        } ?: defaults[key] ?: ""
-        cache[key] = v
+        val v = cache[key] ?: run {
+            val x = dbBlocking {
+                Settings.selectAll().where { Settings.key eq key }.firstOrNull()?.get(Settings.value)
+            } ?: defaults[key] ?: ""
+            cache[key] = x
+            x
+        }
+        // 已取消“开放注册”：历史存的 open 一律当作邀请码注册
+        if (key == REGISTRATION_MODE && v == "open") return "invite"
         return v
     }
 
@@ -103,8 +107,8 @@ class SettingService {
                 throw io.legado.web.auth.BadRequestException("浏览器调试地址需要以 http:// 或 ws:// 开头")
             }
         }
-        if (allowed[REGISTRATION_MODE]?.let { it !in setOf("open", "invite", "closed") } == true) {
-            throw io.legado.web.auth.BadRequestException("registrationMode 只能是 open/invite/closed")
+        if (allowed[REGISTRATION_MODE]?.let { it !in setOf("invite", "closed") } == true) {
+            throw io.legado.web.auth.BadRequestException("registrationMode 只能是 invite/closed")
         }
         dbQuery {
             allowed.forEach { (k, v) ->

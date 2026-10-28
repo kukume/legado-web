@@ -248,6 +248,24 @@ class EngineTest {
             }
             assertTrue(r2.isFailure || r2.getOrNull() == null || r2.getOrNull().toString().startsWith("[JavaPackage"),
                 "服务端内部类应该被屏蔽: ${r2.getOrNull()}")
+
+            // 之前探测到可绕过的几类，逐一确认已被屏蔽（new 必须报错，不能静默返回对象）
+            fun blocked(js: String, name: String) {
+                val res = runCatching { source.evalJS(js) }
+                assertTrue(res.isFailure, "$name 应该被屏蔽，但执行成功了：${res.getOrNull()}")
+            }
+            // XMLDecoder / Expression：能实例化任意类、调用任意方法，等于完全绕过黑名单
+            blocked("""new Packages.java.beans.Expression(new Packages.java.lang.StringBuilder("ab"),"reverse",[]).getValue()""", "java.beans.Expression")
+            blocked("""new Packages.java.beans.XMLDecoder(new Packages.java.io.ByteArrayInputStream(new Packages.java.lang.String("<java/>").getBytes()))""", "java.beans.XMLDecoder")
+            // 直连网络会绕过内网防护
+            blocked("""new Packages.java.net.Socket("127.0.0.1", 1)""", "java.net.Socket")
+            blocked("""new Packages.java.net.URL("http://127.0.0.1/").openConnection()""", "java.net.URL")
+            // 通过 URI.toURL() 也拿不到可用的 URL 实例
+            blocked("""new Packages.java.net.URI("http://127.0.0.1/").toURL().openConnection()""", "URI.toURL()")
+            // 起线程可绕过超时 / 取消
+            blocked("""var t=new Packages.java.lang.Thread(function(){}); t.start()""", "java.lang.Thread")
+            // System.getProperty 信息泄露
+            blocked("""Packages.java.lang.System.getProperty("user.dir")""", "System.getProperty")
         }
     }
 

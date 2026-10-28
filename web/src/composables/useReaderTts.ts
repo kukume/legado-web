@@ -34,6 +34,9 @@ export interface ReaderTtsDeps {
   appendNext: () => Promise<void>
   /** 开始朗读时（收起菜单） */
   onStart: () => void
+  /** 系统媒体控制（锁屏、通知栏、耳机按键）显示的书名和封面 */
+  bookName: () => string
+  coverUrl: () => string | undefined
 }
 
 /**
@@ -427,6 +430,53 @@ export function useReaderTts(d: ReaderTtsDeps) {
   })
 
   onBeforeUnmount(ttsStop)
+
+  // ---------- 系统媒体控制（Media Session）：锁屏、通知栏、耳机和键盘的播放键 ----------
+  // 浏览器只有在页面播放音频时才显示控制：在线朗读引擎（音频）都支持；浏览器语音视浏览器而定
+  const mediaSession = typeof navigator !== "undefined" && "mediaSession" in navigator ? navigator.mediaSession : null
+  const mediaActions: [MediaSessionAction, () => void][] = [
+    ["play", () => ttsResume()],
+    ["pause", () => ttsPause()],
+    ["stop", () => ttsStop()],
+    ["previoustrack", () => ttsSkip(-1)],
+    ["nexttrack", () => ttsSkip(1)],
+  ]
+  function setMediaHandlers(on: boolean) {
+    for (const [action, handler] of mediaActions) {
+      try {
+        mediaSession?.setActionHandler(action, on ? handler : null)
+      } catch {
+        /* 浏览器不支持这个操作 */
+      }
+    }
+  }
+  if (mediaSession) {
+    watch(
+      () => [tts.active, tts.chapter] as const,
+      ([active, chapter]) => {
+        if (!active) {
+          mediaSession.metadata = null
+          mediaSession.playbackState = "none"
+          setMediaHandlers(false)
+          return
+        }
+        const cover = d.coverUrl()
+        mediaSession.metadata = new MediaMetadata({
+          title: d.chapters.value[chapter]?.title || d.bookName(),
+          artist: d.bookName(),
+          album: d.bookName(),
+          artwork: cover ? [{ src: new URL(cover, location.href).href }] : [],
+        })
+        setMediaHandlers(true)
+      },
+    )
+    watch(
+      () => tts.state,
+      (state) => {
+        if (tts.active) mediaSession.playbackState = state === "paused" ? "paused" : "playing"
+      },
+    )
+  }
 
   /** 朗读引擎有改动后重新加载列表；正在朗读时与切换引擎一样，从当前这句起用新的设置重新读 */
   async function reloadEngines() {

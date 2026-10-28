@@ -1,6 +1,7 @@
 package io.legado.web.service
 
 import io.legado.web.auth.BadRequestException
+import io.legado.web.security.NetworkGuard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.Credentials
@@ -12,7 +13,6 @@ import okhttp3.Response
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 import org.jsoup.parser.Parser
-import java.net.InetAddress
 import java.net.URI
 import java.net.URLDecoder
 import java.time.ZonedDateTime
@@ -27,6 +27,8 @@ data class WebDavFile(val name: String, val size: Long, val lastModified: Long, 
 class WebDavClient(
     private val account: String,
     private val password: String,
+    /** 管理员可访问内网；普通用户走带内网防护的客户端 */
+    private val allowPrivate: Boolean = false,
 ) {
     companion object {
         private val client: OkHttpClient by lazy {
@@ -38,11 +40,18 @@ class WebDavClient(
                 .build()
         }
 
+        // 普通用户用：与书源请求共用同一套内网防护，在建立连接时按真实 IP 检查，
+        // 域名解析到内网、重定向到内网、DNS 重绑定都能拦住
+        private val guardedClient: OkHttpClient by lazy {
+            client.newBuilder().socketFactory(NetworkGuard.socketFactory).build()
+        }
+
         private const val PROPFIND_BODY = """<?xml version="1.0" encoding="utf-8"?>
 <a:propfind xmlns:a="DAV:"><a:prop><a:displayname/><a:resourcetype/><a:getcontentlength/><a:getlastmodified/></a:prop></a:propfind>"""
 
         /**
-         * 服务端代替用户访问 WebDAV 地址：非管理员不允许访问本机和内网地址，避免被用来探测服务器所在的内网
+         * 服务端代替用户访问 WebDAV 地址：校验地址合法；非管理员先按内网规则拒绝一次给出友好提示，
+         * 真正的拦截由 [guardedClient] 在连接时按真实 IP 完成（防 DNS 重绑定）
          */
         fun checkUrl(url: String, allowPrivate: Boolean) {
             val uri = runCatching { URI(url) }.getOrNull()
@@ -50,21 +59,20 @@ class WebDavClient(
                 throw BadRequestException("WebDAV 地址无效，应以 http:// 或 https:// 开头")
             }
             if (allowPrivate) return
-            val addresses = runCatching { InetAddress.getAllByName(uri.host).toList() }.getOrElse {
-                throw BadRequestException("无法解析 WebDAV 服务器地址：${uri.host}")
-            }
-            if (addresses.any { it.isLoopbackAddress || it.isSiteLocalAddress || it.isLinkLocalAddress || it.isAnyLocalAddress }) {
+            if (NetworkGuard.isBlockedHost(uri.host)) {
                 throw BadRequestException("不允许使用内网或本机的 WebDAV 地址（请联系管理员）")
             }
         }
     }
+
+    private val http: OkHttpClient get() = if (allowPrivate) client else guardedClient
 
     private fun request(url: String) = Request.Builder().url(url)
         .header("Authorization", Credentials.basic(account, password, Charsets.UTF_8))
 
     private suspend fun <T> exec(req: Request, block: (Response) -> T): T = withContext(Dispatchers.IO) {
         try {
-            client.newCall(req).execute().use(block)
+            http.newCall(req).execute().use(block)
         } catch (e: BadRequestException) {
             throw e
         } catch (e: java.io.IOException) {

@@ -131,7 +131,7 @@ class WebDavService(
     private suspend fun connect(user: UserPrincipal, c: StoredConfig): Pair<WebDavClient, String> {
         if (c.account.isEmpty() || c.password.isEmpty()) throw BadRequestException("还没有配置 WebDAV")
         WebDavClient.checkUrl(c.url, allowPrivate = user.isAdmin)
-        val client = WebDavClient(c.account, decrypt(c.password))
+        val client = WebDavClient(c.account, decrypt(c.password), allowPrivate = user.isAdmin)
         val root = rootUrl(c)
         var base = c.url.trim().ifEmpty { DEFAULT_URL }
         if (!base.endsWith("/")) base += "/"

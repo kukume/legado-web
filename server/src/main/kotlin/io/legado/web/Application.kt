@@ -235,11 +235,11 @@ fun Application.module() {
 
     routing {
         authRoutes(userService, jwtService, settingService, captchaService, updateService)
-        sourceRoutes(sourceService, configService, searchService, subscriptionService)
+        sourceRoutes(sourceService, configService, searchService, subscriptionService, io.legado.web.service.SourceCheckService(sourceService, appSettings))
         shelfRoutes(shelfService, replaceService, proxyService, configService, reviewService, localBookService)
         openApiRoutes(apiKeyService, shelfService)
         backupRoutes(backupService, webDavService)
-        mediaRoutes(audioService, ttsService)
+        mediaRoutes(audioService, ttsService, io.legado.web.service.FontService(appSettings.dataDir))
         bookmarkRoutes(bookmarkService)
         readingStatsRoutes(readingStatsService)
         ruleRoutes(dictRuleService, txtTocRuleService)

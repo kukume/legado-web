@@ -66,7 +66,35 @@ export interface SourceDetail {
   source: any
 }
 
+/** 书源校验结果 */
+export interface SourceCheckResult {
+  id: number
+  name: string
+  ok: boolean
+  /** 失败时加上的分组：搜索失效、详情失效、目录失效、正文失效、校验超时 */
+  group: string | null
+  error: string | null
+  time: number
+  /** 分组是否已写回书源（公共书源普通用户不能修改） */
+  saved: boolean
+}
+
+export type SourceCheckEvent =
+  | { type: 'result'; done: number; total: number; result: SourceCheckResult }
+  | { type: 'end' }
+
+export interface ImportPreviewItem {
+  name: string
+  url: string
+  group?: string | null
+  status: 'new' | 'update' | 'exists'
+  json: string
+}
+
 export const sourceApi = {
+  /** 校验书源：搜索 → 详情 → 目录 → 正文，每校验完一个回调一次 */
+  check: (ids: number[], keyword: string, onEvent: (e: SourceCheckEvent) => void, signal?: AbortSignal) =>
+    streamNdjson('POST', '/api/sources/check', { ids, keyword: keyword || null }, onEvent, signal),
   list: () => http.get<SourceSummary[]>('/api/sources'),
   groups: () => http.get<string[]>('/api/sources/groups'),
   get: (id: number) => http.get<SourceDetail>(`/api/sources/${id}`),
@@ -74,6 +102,8 @@ export const sourceApi = {
     http.post<ImportResult>('/api/sources/import', { text, isPublic }),
   importUrl: (url: string, isPublic = false) =>
     http.post<ImportResult>('/api/sources/import-url', { url, isPublic }),
+  /** 下载链接里的书源并列出新增 / 更新 / 已有，勾选后用 importText 导入 */
+  importPreview: (url: string) => http.post<ImportPreviewItem[]>('/api/sources/import-preview', { url }),
   create: (source: string, isPublic?: boolean) => http.post<{ id: number }>('/api/sources', { source, isPublic }),
   save: (id: number, source: string, isPublic?: boolean) =>
     http.put<{ id: number }>(`/api/sources/${id}`, { source, isPublic }),
@@ -182,9 +212,11 @@ export const shelfApi = {
   open: (req: OpenBookRequest) => http.post<Book>('/api/shelf/open', req),
   refreshAll: () => http.post<{ message: string }>('/api/shelf/refresh'),
   get: (id: number) => http.get<Book>(`/api/shelf/${id}`),
-  update: (id: number, data: Partial<Pick<Book, 'name' | 'author' | 'groupId' | 'inShelf' | 'customCoverUrl' | 'customIntro' | 'canUpdate' | 'order' | 'reSegment' | 'removeSameTitle'>>) =>
+  update: (id: number, data: Partial<Pick<Book, 'name' | 'author' | 'groupId' | 'inShelf' | 'customCoverUrl' | 'customIntro' | 'canUpdate' | 'order' | 'reSegment' | 'removeSameTitle' | 'useReplaceRule'>>) =>
     http.patch<Book>(`/api/shelf/${id}`, data),
   remove: (id: number) => http.del(`/api/shelf/${id}`),
+  /** 手动排序：按新顺序排列的书籍 id */
+  saveOrder: (ids: number[]) => http.put('/api/shelf/order', { ids }),
   refresh: (id: number, info = false) => http.post<Book>(`/api/shelf/${id}/refresh${info ? '?info=true' : ''}`),
   /** 本地 TXT 按指定目录规则重新分章；tocUrl 为空字符串时自动选择 */
   setTxtToc: (id: number, tocUrl: string) => http.post<Book>(`/api/shelf/${id}/txt-toc`, { tocUrl }),
@@ -374,6 +406,41 @@ export const bookmarkApi = {
     http.post<Bookmark>(`/api/shelf/${bookId}/bookmarks`, b),
   update: (id: number, content: string) => http.put(`/api/bookmarks/${id}`, { content }),
   remove: (ids: number[]) => http.post('/api/bookmarks/delete', { ids }),
+}
+
+/** 阅读字体（用户上传，在所有设备上可用） */
+export interface UserFont {
+  id: number
+  name: string
+  format: string
+  size: number
+}
+
+export const fontApi = {
+  list: () => http.get<UserFont[]>('/api/fonts'),
+  /** 上传字体文件（TTF、OTF、WOFF、WOFF2、TTC，最大 30MB） */
+  upload: async (file: File): Promise<UserFont> => {
+    let res: Response
+    try {
+      res = await fetch(`/api/fonts?name=${encodeURIComponent(file.name)}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${getToken()}`, 'Accept-Language': locale, 'Content-Type': 'application/octet-stream' },
+        body: file,
+      })
+    } catch {
+      throw new NetworkError()
+    }
+    const data = await res.json().catch(() => null)
+    if (!res.ok) throw new ApiError(res.status, data?.error || t('上传失败（{0}）', [res.status]))
+    return data as UserFont
+  },
+  remove: (id: number) => http.del(`/api/fonts/${id}`),
+  /** 字体文件内容（浏览器会长期缓存） */
+  file: async (id: number): Promise<ArrayBuffer> => {
+    const res = await fetch(`/api/fonts/${id}/file`, { headers: { Authorization: `Bearer ${getToken()}` } })
+    if (!res.ok) throw new ApiError(res.status, t('字体加载失败（{0}）', [res.status]))
+    return res.arrayBuffer()
+  },
 }
 
 export const ttsApi = {

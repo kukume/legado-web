@@ -18,6 +18,8 @@ import io.legado.web.auth.ForbiddenException
 import io.legado.web.auth.NotFoundException
 import io.legado.web.auth.UserPrincipal
 import io.legado.web.db.BookSources
+import io.legado.web.db.Books
+import io.legado.web.security.ScriptUrls
 import io.legado.web.db.UserSourcePrefs
 import io.legado.web.db.dbQuery
 import org.jetbrains.exposed.v1.core.ResultRow
@@ -57,6 +59,15 @@ data class SourceSummary(
 /** 带数据库 id 的书源 */
 data class StoredSource(val id: Long, val ownerId: Long, val isPublic: Boolean, val source: BookSource)
 
+/** 导入预览的一条：status 为 new（新增）、update（比已有的新）、exists（已有，不比已有的新） */
+data class ImportPreviewItem(
+    val name: String,
+    val url: String,
+    val group: String?,
+    val status: String,
+    val json: String,
+)
+
 data class ImportResult(val added: Int, val updated: Int, val failed: Int, val errors: List<String>)
 
 class SourceService(
@@ -66,6 +77,23 @@ class SourceService(
 
     /** 解析后的书源缓存（id -> 更新时间 + 对象），避免每次都解析 JSON */
     private val parsedCache = ConcurrentHashMap<Long, Pair<Long, BookSource>>()
+
+    /**
+     * 前端传回、要交给引擎的网址（书籍、目录、封面、发现分类、图片）：带脚本的必须是服务器交给过这个用户的，
+     * 或者已经在他的书架里（见 [ScriptUrls]）。能添加书源的用户本来就可以写 js，不检查
+     */
+    suspend fun requireTrustedUrls(user: UserPrincipal, vararg urls: String?) {
+        val risky = urls.filterNotNull().filter { ScriptUrls.hasScript(it) && !ScriptUrls.isRemembered(user.id, it) }
+        if (risky.isEmpty() || canAddSource(user)) return
+        val known = dbQuery {
+            risky.all { u ->
+                Books.selectAll().where {
+                    (Books.userId eq user.id) and ((Books.bookUrl eq u) or (Books.tocUrl eq u) or (Books.coverUrl eq u) or (Books.customCoverUrl eq u))
+                }.limit(1).any()
+            }
+        }
+        if (!known) throw ForbiddenException("网址中含有脚本，只能使用书源返回的网址")
+    }
 
     fun canAddSource(user: UserPrincipal): Boolean =
         user.isAdmin || settings.getBool(SettingService.ALLOW_USER_SOURCES) ||
@@ -203,6 +231,30 @@ class SourceService(
     suspend fun importFromUrl(user: UserPrincipal, url: String, isPublic: Boolean): ImportResult {
         val text = fetchText(url.trim())
         return import(user, parseAny(user, text), isPublic)
+    }
+
+    /**
+     * 导入前预览（与 App 的导入弹窗一致）：列出每个书源是新增、更新还是已有，由用户勾选后再导入
+     */
+    suspend fun previewImport(user: UserPrincipal, sources: List<BookSource>): List<ImportPreviewItem> {
+        if (!canAddSource(user)) throw ForbiddenException("管理员未开放用户添加书源")
+        val urls = sources.map { it.bookSourceUrl.take(1024) }.distinct()
+        val existing = dbQuery {
+            // 分批查询，避免书源很多时超出 SQL 参数个数上限
+            urls.chunked(500).flatMap { part ->
+                BookSources.selectAll().where { (BookSources.ownerId eq user.id) and (BookSources.url inList part) }
+                    .map { it[BookSources.url] to it.toSource().lastUpdateTime }
+            }.toMap()
+        }
+        return sources.map { src ->
+            val old = existing[src.bookSourceUrl.take(1024)]
+            val status = when {
+                old == null -> "new"
+                src.lastUpdateTime > old -> "update"
+                else -> "exists"
+            }
+            ImportPreviewItem(src.bookSourceName, src.bookSourceUrl, src.bookSourceGroup, status, sourceJson(src))
+        }
     }
 
     suspend fun import(user: UserPrincipal, sources: List<BookSource>, isPublic: Boolean): ImportResult {
@@ -380,6 +432,22 @@ class SourceService(
                 .orderBy(BookSources.customOrder to SortOrder.ASC)
                 .map { it.toSource() }
         }
+    }
+
+    /**
+     * 书源校验的结果写回书源（与 App 相同）：去掉旧的“…失效”“校验超时”分组，失败时加上新的分组，记录响应时间。
+     * 只修改自己能编辑的书源，返回是否能修改（公共书源普通用户不能改）
+     */
+    suspend fun applyCheckResult(user: UserPrincipal, id: Long, invalidGroup: String?, time: Long): Boolean = dbQuery {
+        val row = BookSources.selectAll().where { BookSources.id eq id }.firstOrNull() ?: return@dbQuery false
+        BookSources.update({ BookSources.id eq id }) { it[respondTime] = time }
+        if (!row.canEdit(user)) return@dbQuery false
+        val src = row.toSource()
+        val before = src.bookSourceGroup
+        src.removeInvalidGroups()
+        invalidGroup?.let { src.addGroup(it) }
+        if (src.bookSourceGroup != before) writeSource(id, src, null)
+        true
     }
 
     /** 更新书源响应时间（用于排序） */

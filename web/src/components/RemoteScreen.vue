@@ -54,6 +54,7 @@ function connect() {
         error.value = d.value
         es?.close()
       } else if (d.type === 'dialog' && d.value) message.info(t('网页提示：{0}', [d.value]))
+      else if (d.type === 'blocked') message.warning(t('只能打开书源自己网站的网页，已阻止跳转到 {0}', [d.value]))
     } catch {
       /* ignore */
     }

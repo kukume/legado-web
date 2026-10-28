@@ -28,6 +28,7 @@ import io.legado.app.utils.fromJsonArray
 import io.legado.app.utils.fromJsonObject
 import io.legado.app.utils.has
 import io.legado.app.utils.isMainThread
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 
 internal object LoginInfoMapInitialization {
@@ -200,6 +201,9 @@ interface BaseSource : JsExtensions {
                 GSON.fromJsonObject<Map<String, String>>(json).getOrNull()?.let { map ->
                     putAll(map)
                 }
+            } catch (e: CancellationException) {
+                // 离开阅读页会取消进行中的书源请求，这是正常的生命周期，不记成请求头规则错误
+                throw e
             } catch (e: Exception) {
                 AppLog.put("执行请求头规则出错\n$e", e)
             }

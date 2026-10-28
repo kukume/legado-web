@@ -101,7 +101,8 @@ class UserService(private val settings: SettingService) {
             if (!isFirst) {
                 when (mode) {
                     "closed" -> throw ForbiddenException("系统已关闭注册")
-                    "invite" -> {
+                    // 已取消开放注册：除“关闭”外一律要求邀请码（含历史存的 open）
+                    else -> {
                         val code = inviteCode?.trim()
                         if (code.isNullOrEmpty()) throw BadRequestException("需要邀请码")
                         val invite = InviteCodes.selectAll().where { InviteCodes.code eq code }.firstOrNull()

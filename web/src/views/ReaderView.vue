@@ -8,6 +8,7 @@ import { shelfApi } from '@/api'
 import QuickReplaceModal from '@/components/QuickReplaceModal.vue'
 import DictModal from '@/components/DictModal.vue'
 import ReadAloudPanel from '@/components/ReadAloudPanel.vue'
+import ImageViewer from '@/components/ImageViewer.vue'
 import TtsEngineManager from '@/components/TtsEngineManager.vue'
 import ReviewDrawer from '@/components/ReviewDrawer.vue'
 import CustomThemeModal from '@/components/CustomThemeModal.vue'
@@ -26,7 +27,7 @@ import { getToken, isNetworkError, proxyImage } from '@/api/http'
 import { putLocalProgress } from '@/offline/db'
 import { useOfflineStore } from '@/stores/offline'
 import type { Book, Bookmark, BookSearchHit, Chapter } from '@/api/types'
-import { customThemeKey, customToTheme, fontFamily, readerThemes, useReaderStore, type CustomTheme, type PageAnim } from '@/stores/reader'
+import { customFontId, customThemeKey, customToTheme, fontFamily, readerThemes, useReaderStore, type CustomTheme, type PageAnim } from '@/stores/reader'
 import { parseContent, type ContentImage } from '@/utils/content'
 import { useScriptEffects } from '@/utils/effects'
 import { eventToKey, findAction } from '@/utils/keys'
@@ -34,6 +35,7 @@ import { useScrollMode } from '@/composables/useScrollMode'
 import { usePagedMode } from '@/composables/usePagedMode'
 import { useTextSelection } from '@/composables/useTextSelection'
 import { useWakeLock } from '@/composables/useWakeLock'
+import { loadCustomFont } from '@/utils/customFont'
 import { setPageThemeColor } from '@/utils/themeColor'
 import { useAutoRead } from '@/composables/useAutoRead'
 import { useReadingStats } from '@/composables/useReadingStats'
@@ -121,6 +123,11 @@ const cssVars = computed(() => ({
   '--r-font': fontFamily(cfg.value.fontFamily),
   '--r-indent': cfg.value.indent ? '2em' : '0',
   '--r-weight': String(cfg.value.fontWeight),
+  '--r-title-size': `${cfg.value.titleSize ?? 1.4}em`,
+  '--r-title-align': cfg.value.titleAlign === 'center' ? 'center' : 'left',
+  '--r-title-display': cfg.value.titleAlign === 'hidden' ? 'none' : 'block',
+  '--r-title-top': `${cfg.value.titleTop ?? 0.4}em`,
+  '--r-title-bottom': `${cfg.value.titleBottom ?? 1.2}em`,
 }))
 
 // ---------------- 正文加载、段评 ----------------
@@ -250,6 +257,11 @@ const { tts, ttsEngines, ttsVoices, browserTts, ttsEngineName, ttsStart, ttsStar
   cfg, chapters, curIndex, isPaged, isVertical, pageSeg, segments, pageClip, scroller, columns,
   page, pageCount, pageStarts, pageMetrics, updatePagePos, openPage, openScroll, appendNext,
   onStart: () => (menuVisible.value = false),
+  bookName: () => book.value?.name ?? "",
+  coverUrl: () => {
+    const c = book.value?.customCoverUrl || book.value?.coverUrl
+    return c ? imgSrc(c) : undefined
+  },
 })
 
 // 阅读时屏幕常亮
@@ -351,12 +363,12 @@ const dictWord = ref("")
 /** 本书的正文处理开关（只对有文字的书显示） */
 const processing = computed(() =>
   book.value && !isComic.value && !book.value.isAudio && !book.value.isVideo
-    ? { reSegment: !!book.value.reSegment, removeSameTitle: book.value.removeSameTitle !== false }
+    ? { reSegment: !!book.value.reSegment, removeSameTitle: book.value.removeSameTitle !== false, useReplaceRule: book.value.useReplaceRule !== false }
     : null,
 )
 
 /** 修改正文处理后清空正文缓存，按新的设置重新显示当前章节 */
-async function setProcessing(key: "reSegment" | "removeSameTitle", value: boolean) {
+async function setProcessing(key: "reSegment" | "removeSameTitle" | "useReplaceRule", value: boolean) {
   if (!book.value) return
   try {
     book.value = await shelfApi.update(book.value.id, { [key]: value })
@@ -569,10 +581,21 @@ function onBeforeUnload() {
   saveProgress(true)
 }
 
+// 用户上传的字体：加载完成后重新排版（加载前先用系统字体显示）
+const fontVersion = ref(0)
+watch(
+  () => customFontId(cfg.value.fontFamily),
+  async (id) => {
+    if (id && (await loadCustomFont(id))) fontVersion.value++
+  },
+  { immediate: true },
+)
+
 // 修改排版后重新计算
 watch(
   () => [cfg.value.fontSize, cfg.value.lineHeight, cfg.value.paragraphSpacing, cfg.value.letterSpacing,
-    cfg.value.fontFamily, cfg.value.width, cfg.value.indent, cfg.value.fontWeight],
+    cfg.value.fontFamily, cfg.value.width, cfg.value.indent, cfg.value.fontWeight, fontVersion.value,
+    cfg.value.titleAlign, cfg.value.titleSize, cfg.value.titleTop, cfg.value.titleBottom],
   async () => {
     if (isPaged.value) {
       await nextTick()
@@ -645,11 +668,22 @@ onBeforeUnmount(() => {
 // 正文图片点击：段评气泡、本章说卡片等（执行图片参数中的书源脚本，评论页以底部弹窗显示）
 const effects = useScriptEffects()
 const clickingImg = ref(false)
-/** 图片点击：只有可点击的图片拦截点击，其余交给翻页 / 菜单 */
+/**
+ * 图片点击：书源可点击的图片执行书源脚本；文字书中的插图打开图片查看；
+ * 漫画、行内小图（表情等）交给翻页 / 菜单
+ */
+const viewerSrc = ref('')
+const showViewer = ref(false)
 function onImgTap(e: MouseEvent, index: number, img: ContentImage) {
-  if (!img.clickable) return
+  if (img.clickable) {
+    e.stopPropagation()
+    onImgClick(index, img)
+    return
+  }
+  if (isComic.value || img.style === 'text' || selection.show) return
   e.stopPropagation()
-  onImgClick(index, img)
+  viewerSrc.value = imgSrc(img.display)
+  showViewer.value = true
 }
 
 async function onImgClick(index: number, img: ContentImage) {
@@ -883,6 +917,7 @@ function onChanged(nb: Book) {
     </div>
 
     <change-source-modal v-model:show="showChange" :book="book" @changed="onChanged" />
+    <image-viewer v-model:show="showViewer" :src="viewerSrc" />
     <read-aloud-panel
       v-if="tts.active"
       :state="tts.state"

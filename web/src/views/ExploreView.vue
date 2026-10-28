@@ -6,6 +6,7 @@ import { NButton, NEmpty, NInput, NSelect, NSpin, useMessage } from 'naive-ui'
 import SearchResultItem from '@/components/SearchResultItem.vue'
 import { shelfApi, sourceApi, toOpenRequest } from '@/api'
 import type { ExploreKind, SearchBook, SourceSummary } from '@/api/types'
+import { safeHref } from '@/utils/safeUrl'
 import { t } from '@/i18n'
 
 defineOptions({ name: 'ExploreView' })
@@ -243,7 +244,7 @@ async function open(b: SearchBook) {
 
     <div v-if="openLinks.length" class="links card">
       <span class="muted">{{ t('书源请求打开以下网页（若未自动弹出请点击）：') }}</span>
-      <a v-for="u in openLinks" :key="u" :href="u" target="_blank" rel="noopener">{{ u }}</a>
+      <a v-for="u in openLinks" :key="u" :href="safeHref(u)" target="_blank" rel="noopener">{{ u }}</a>
       <n-button text size="tiny" @click="openLinks = []">{{ t('关闭') }}</n-button>
     </div>
 

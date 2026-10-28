@@ -7,8 +7,10 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.OutgoingContent
 import io.ktor.http.headersOf
 import io.ktor.server.auth.authenticate
+import io.ktor.server.request.contentLength
 import io.ktor.server.request.header
 import io.ktor.server.request.receive
+import io.ktor.server.request.receiveChannel
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.header
 import io.ktor.server.response.respond
@@ -20,6 +22,7 @@ import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.put
 import io.ktor.utils.io.ByteWriteChannel
+import io.ktor.utils.io.readAvailable
 import io.ktor.utils.io.writeFully
 import io.legado.app.data.entities.HttpTTS
 import io.legado.web.auth.AUTH_JWT
@@ -78,7 +81,7 @@ private class UpstreamContent(private val res: Response) : OutgoingContent.Write
  * - GET  /api/shelf/{id}/audio/{index}?token=&refresh=  音频（经服务器转发，支持 Range）；m3u8 分片地址带 u、sig
  * - /api/tts/…  在线朗读引擎：列表、新建、编辑、导入、导出、删除、试听、合成语音
  */
-fun Route.mediaRoutes(audioService: AudioService, ttsService: TtsService) {
+fun Route.mediaRoutes(audioService: AudioService, ttsService: TtsService, fontService: io.legado.web.service.FontService) {
     authenticate(AUTH_JWT) {
         get("/api/shelf/{id}/audio/{index}/info") {
             val q = call.request.queryParameters
@@ -103,6 +106,42 @@ fun Route.mediaRoutes(audioService: AudioService, ttsService: TtsService) {
         get("/api/tts") { call.respond(ttsService.list(call.user)) }
         get("/api/tts/export") { call.respond(ttsService.export(call.user)) }
         post("/api/tts/import") { call.respond(ttsService.import(call.user, call.receiveText())) }
+        // ---------- 阅读字体 ----------
+        get("/api/fonts") { call.respond(fontService.list(call.user)) }
+        /** 上传字体：请求体为字体文件，?name= 为文件名 */
+        post("/api/fonts") {
+            val max = io.legado.web.service.FontService.MAX_SIZE
+            call.request.contentLength()?.let { if (it > max) throw io.legado.web.auth.BadRequestException("字体文件过大（最大 30MB）") }
+            val tmp = java.io.File.createTempFile("font-", ".tmp")
+            try {
+                val channel = call.receiveChannel()
+                tmp.outputStream().use { out ->
+                    val buf = ByteArray(64 * 1024)
+                    var total = 0L
+                    while (true) {
+                        val n = channel.readAvailable(buf, 0, buf.size)
+                        if (n < 0) break
+                        total += n
+                        if (total > max) throw io.legado.web.auth.BadRequestException("字体文件过大（最大 30MB）")
+                        out.write(buf, 0, n)
+                    }
+                }
+                call.respond(fontService.add(call.user, tmp, call.request.queryParameters["name"].orEmpty()))
+            } finally {
+                tmp.delete()
+            }
+        }
+        /** 字体文件：内容不会变（修改就是新的 id），可以长期缓存 */
+        get("/api/fonts/{id}/file") {
+            val (file, format) = fontService.get(call.user, call.longParam("id"))
+            call.response.header(HttpHeaders.CacheControl, "private, max-age=31536000, immutable")
+            call.respondBytes(file.readBytes(), ContentType.parse(io.legado.web.service.FontService.contentType(format)))
+        }
+        delete("/api/fonts/{id}") {
+            fontService.delete(call.user, call.longParam("id"))
+            call.respond(OkResponse())
+        }
+
         get("/api/tts/{id}") { call.respond(ttsService.get(call.user, call.longParam("id"))) }
         post("/api/tts") { call.respond(ttsService.save(call.user, null, call.receive<HttpTTS>())) }
         put("/api/tts/{id}") { call.respond(ttsService.save(call.user, call.longParam("id"), call.receive<HttpTTS>())) }

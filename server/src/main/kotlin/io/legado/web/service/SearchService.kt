@@ -1,5 +1,6 @@
 package io.legado.web.service
 
+import io.legado.web.security.ScriptUrls
 import io.legado.app.data.entities.SearchBook
 import io.legado.web.auth.UserPrincipal
 import io.legado.web.config.AppSettings
@@ -78,7 +79,7 @@ class SearchService(
                             }
                             val time = System.currentTimeMillis() - start
                             if (books.isNotEmpty()) {
-                                events.send(SearchEvent.Result(books.map { it.toItem(stored.id, time) }))
+                                events.send(SearchEvent.Result(books.map { it.toItem(user.id, stored.id, time) }))
                             }
                             if (stored.ownerId == user.id) sourceService.updateRespondTime(stored.id, time)
                         } catch (e: CancellationException) {
@@ -104,7 +105,7 @@ class SearchService(
         }
     }
 
-    private fun SearchBook.toItem(sourceId: Long, time: Long) = SearchResultItem(
+    private fun SearchBook.toItem(userId: Long, sourceId: Long, time: Long) = SearchResultItem(
         name = name,
         author = author,
         kind = kind,
@@ -120,7 +121,7 @@ class SearchService(
         tocUrl = tocUrl,
         variable = variable,
         respondTime = time,
-    )
+    ).also { ScriptUrls.remember(userId, bookUrl, tocUrl, coverUrl) }
 
     /**
      * 单书源搜索（换源 / 发现）
@@ -131,7 +132,7 @@ class SearchService(
         val books = runEngine(user.id, settings.searchTimeout) {
             WebBook.searchBookAwait(stored.source, key, page)
         }
-        return books.map { it.toItem(stored.id, System.currentTimeMillis() - start) }
+        return books.map { it.toItem(user.id, stored.id, System.currentTimeMillis() - start) }
     }
 
     /**
@@ -139,6 +140,7 @@ class SearchService(
      */
     suspend fun explore(user: UserPrincipal, sourceId: Long, url: String, page: Int): ExploreResult {
         val stored = sourceService.get(user, sourceId)
+        sourceService.requireTrustedUrls(user, url)
         val start = System.currentTimeMillis()
         val ctx = io.legado.app.help.engine.EngineContext(user.id)
         val books = try {
@@ -151,7 +153,7 @@ class SearchService(
             emptyList()
         }
         return ExploreResult(
-            books = books.map { it.toItem(stored.id, System.currentTimeMillis() - start) },
+            books = books.map { it.toItem(user.id, stored.id, System.currentTimeMillis() - start) },
             messages = ctx.messages.toList(),
             openUrls = ctx.openUrls.distinct(),
         )

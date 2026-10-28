@@ -318,6 +318,7 @@ class BrowserBridge : SourceVerificationHelp.Handler {
             RemoteBrowserManager.OpenRequest(
                 method = req.method, url = req.url, body = req.body, contentType = req.contentType,
                 headers = analyzeUrl.headerMap.toMap(), cookie = CookieStore.getCookie(req.url),
+                sourceUrl = source.getKey(),
             )
         } catch (e: Exception) {
             logger.warn("无法解析网址 {}，改用前端显示: {}", url, e.message)

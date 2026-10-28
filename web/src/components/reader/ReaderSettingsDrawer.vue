@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { NButton, NDrawer, NDrawerContent, NRadioButton, NRadioGroup, NSelect, NSlider, NSwitch } from 'naive-ui'
-import { customThemeKey, readerFonts, readerThemes, useReaderStore, type CustomTheme, type PageAnim } from '@/stores/reader'
+import { computed, ref, watch } from 'vue'
+import { NButton, NDrawer, NDrawerContent, NRadioButton, NRadioGroup, NSelect, NSlider, NSwitch, useDialog, useMessage } from 'naive-ui'
+import { customFontId, customThemeKey, readerFonts, readerThemes, useReaderStore, type CustomTheme, type PageAnim } from '@/stores/reader'
+import { fontApi, type UserFont } from '@/api'
 import { wakeLockSupported } from '@/composables/useWakeLock'
 import { isEn, t } from '@/i18n'
 
@@ -14,7 +15,7 @@ defineProps<{
   autoRunning: boolean
   autoLabel: string
   /** 本书的正文处理（漫画、PDF 等没有文字的书为 null） */
-  processing: { reSegment: boolean; removeSameTitle: boolean } | null
+  processing: { reSegment: boolean; removeSameTitle: boolean; useReplaceRule: boolean } | null
 }>()
 const show = defineModel<boolean>('show', { default: false })
 defineEmits<{
@@ -23,12 +24,74 @@ defineEmits<{
   keys: []
   newTheme: []
   editTheme: [theme: CustomTheme]
-  process: [key: 'reSegment' | 'removeSameTitle', value: boolean]
+  process: [key: 'reSegment' | 'removeSameTitle' | 'useReplaceRule', value: boolean]
 }>()
 
 const readerStore = useReaderStore()
 const cfg = computed(() => readerStore.config)
 const customThemes = computed(() => cfg.value.customThemes ?? [])
+
+// ---------------- 字体：预设字体 + 用户上传的字体 ----------------
+
+const message = useMessage()
+const dialog = useDialog()
+const userFonts = ref<UserFont[]>([])
+const fontsLoaded = ref(false)
+const uploading = ref(false)
+const fontInput = ref<HTMLInputElement | null>(null)
+
+// 第一次打开设置时读取上传的字体
+watch(show, async (v) => {
+  if (!v || fontsLoaded.value) return
+  try {
+    userFonts.value = await fontApi.list()
+    fontsLoaded.value = true
+  } catch {
+    /* 读取失败时只显示预设字体 */
+  }
+})
+
+const fontOptions = computed(() => [
+  ...readerFonts,
+  ...userFonts.value.map((f) => ({ label: f.name, value: `custom:${f.id}` })),
+  // 设置里是已删除的字体时也显示一项，避免下拉框显示成一串 id
+  ...(customFontId(cfg.value.fontFamily) && !userFonts.value.some((f) => `custom:${f.id}` === cfg.value.fontFamily)
+    ? [{ label: t('（字体已删除）'), value: cfg.value.fontFamily }]
+    : []),
+])
+const currentFont = computed(() => userFonts.value.find((f) => `custom:${f.id}` === cfg.value.fontFamily) ?? null)
+
+async function onFontFile(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  uploading.value = true
+  try {
+    const f = await fontApi.upload(file)
+    userFonts.value.push(f)
+    cfg.value.fontFamily = `custom:${f.id}`
+    message.success(t('已添加字体「{0}」', [f.name]))
+  } catch (err: any) {
+    message.error(err.message)
+  } finally {
+    uploading.value = false
+  }
+}
+
+function removeFont(f: UserFont) {
+  dialog.warning({
+    title: t('删除字体'),
+    content: t('确定删除字体「{0}」？使用它的设备会改回系统默认字体。', [f.name]),
+    positiveText: t('删除'),
+    negativeText: t('取消'),
+    onPositiveClick: async () => {
+      await fontApi.remove(f.id)
+      userFonts.value = userFonts.value.filter((x) => x.id !== f.id)
+      if (cfg.value.fontFamily === `custom:${f.id}`) cfg.value.fontFamily = 'system'
+    },
+  })
+}
 </script>
 
 <template>
@@ -88,7 +151,10 @@ const customThemes = computed(() => cfg.value.customThemes ?? [])
         </div>
         <div class="set-row">
           <label>{{ t('字体') }}</label>
-          <n-select v-model:value="cfg.fontFamily" :options="readerFonts" size="small" style="width: 160px" />
+          <n-select v-model:value="cfg.fontFamily" :options="fontOptions" size="small" style="width: 160px" />
+          <n-button size="small" :loading="uploading" @click="fontInput?.click()">{{ t('上传字体') }}</n-button>
+          <n-button v-if="currentFont" size="small" type="error" ghost @click="removeFont(currentFont)">{{ t('删除') }}</n-button>
+          <input ref="fontInput" type="file" accept=".ttf,.otf,.woff,.woff2,.ttc,font/*" hidden @change="onFontFile" />
         </div>
         <div v-if="!isComic" class="set-row">
           <label>{{ t('自动阅读') }}</label>
@@ -129,7 +195,36 @@ const customThemes = computed(() => cfg.value.customThemes ?? [])
           <label style="margin-left: 24px">{{ t('点击任意位置都向后翻') }}</label>
           <n-switch v-model:value="cfg.tapNextOnLeft" />
         </div>
+        <template v-if="!isComic">
+          <div class="set-row">
+            <label>{{ t('标题') }}</label>
+            <n-radio-group :value="cfg.titleAlign ?? 'left'" size="small" @update:value="(v: 'left' | 'center' | 'hidden') => (cfg.titleAlign = v)">
+              <n-radio-button value="left">{{ t('居左') }}</n-radio-button>
+              <n-radio-button value="center">{{ t('居中') }}</n-radio-button>
+              <n-radio-button value="hidden">{{ t('隐藏') }}</n-radio-button>
+            </n-radio-group>
+          </div>
+          <template v-if="cfg.titleAlign !== 'hidden'">
+            <div class="set-row">
+              <label>{{ t('标题字号 {0}', [(cfg.titleSize ?? 1.4).toFixed(1)]) }}</label>
+              <n-slider :value="cfg.titleSize ?? 1.4" :min="1" :max="2.4" :step="0.1" @update:value="(v: number) => (cfg.titleSize = v)" />
+            </div>
+            <div class="set-row">
+              <label>{{ t('上间距 {0}', [(cfg.titleTop ?? 0.4).toFixed(1)]) }}</label>
+              <n-slider :value="cfg.titleTop ?? 0.4" :min="0" :max="4" :step="0.1" @update:value="(v: number) => (cfg.titleTop = v)" />
+            </div>
+            <div class="set-row">
+              <label>{{ t('下间距 {0}', [(cfg.titleBottom ?? 1.2).toFixed(1)]) }}</label>
+              <n-slider :value="cfg.titleBottom ?? 1.2" :min="0" :max="4" :step="0.1" @update:value="(v: number) => (cfg.titleBottom = v)" />
+            </div>
+          </template>
+        </template>
         <template v-if="processing">
+          <div class="set-row">
+            <label>{{ t('替换净化') }}</label>
+            <n-switch :value="processing.useReplaceRule" @update:value="(v: boolean) => $emit('process', 'useReplaceRule', v)" />
+            <span class="muted-r small">{{ t('本书使用替换规则（去广告、改错字等），关闭后显示原文') }}</span>
+          </div>
           <div class="set-row">
             <label>{{ t('删除重复标题') }}</label>
             <n-switch :value="processing.removeSameTitle" @update:value="(v: boolean) => $emit('process', 'removeSameTitle', v)" />

@@ -39,6 +39,11 @@ import java.util.Collections
  * 阻止脚本访问敏感类。
  * 服务端版本在阅读原有列表基础上，额外屏蔽了数据库、Web 框架以及本应用内部的类，
  * 防止书源 JS 读取其他用户数据或操作服务器。
+ *
+ * 注意：这是黑名单，不可能做到完美——JDK 和依赖里任何一个能读写文件、反射、起线程、发网络请求的类
+ * 漏进来都是一次绕过，每次升级 JDK 或新增依赖都可能引入新的可利用类。真正的防线是“只有有‘添加书源’
+ * 权限的用户才能把 js 送进引擎”（见 io.legado.web.security.ScriptUrls）。能添加书源的用户本就被信任可写 js，
+ * 对这类用户此黑名单只是纵深防御。长期更稳妥的做法是改为白名单，但需用大量真实书源验证常用类后再切换。
  */
 object RhinoClassShutter : ClassShutter {
 
@@ -72,6 +77,27 @@ object RhinoClassShutter : ClassShutter {
             "java.nio.file.FileSystems",
             "java.util.Formatter",
             "sun.misc.Unsafe",
+            // 可实例化任意类、调用任意方法的“表达式/反序列化”类（XMLDecoder、Expression、Statement 等）
+            "java.beans",
+            // 起线程可绕过书源超时和取消；下面几类线程池同理
+            "java.lang.Thread",
+            "java.util.concurrent.Executors",
+            "java.util.concurrent.ThreadPoolExecutor",
+            "java.util.concurrent.ScheduledThreadPoolExecutor",
+            "java.util.concurrent.ForkJoinPool",
+            "java.util.concurrent.CompletableFuture",
+            // 直接发网络请求会绕过内网防护（NetworkGuard 只作用于引擎的 OkHttp）；
+            // 保留 URLEncoder / URLDecoder / URI（前缀匹配需要 '.' 或完全相等，不会误伤）
+            "java.net.URL",
+            "java.net.URLConnection",
+            "java.net.HttpURLConnection",
+            "java.net.Socket",
+            "java.net.ServerSocket",
+            "java.net.DatagramSocket",
+            "java.net.MulticastSocket",
+            "java.net.Proxy",
+            "java.net.ProxySelector",
+            "javax.net",
 
             "cn.hutool.core.lang.JarClassLoader",
             "cn.hutool.core.lang.Singleton",
@@ -124,7 +150,7 @@ object RhinoClassShutter : ClassShutter {
     private val systemClassProtectedName by lazy {
         Collections.unmodifiableSet(
             hashSetOf(
-                "load", "loadLibrary", "exit", "getenv", "getProperties",
+                "load", "loadLibrary", "exit", "getenv", "getProperty", "getProperties",
                 "setProperty", "setProperties", "clearProperty", "setOut", "setErr", "setIn",
                 "console", "inheritedChannel", "setSecurityManager", "getLogger"
             )
@@ -144,6 +170,12 @@ object RhinoClassShutter : ClassShutter {
             okio.Path::class.java,
             FileSystem::class.java,
             Path::class.java,
+            // 即使通过别的途径拿到实例（如 new java.net.URI(..).toURL()）也挡住
+            java.net.URL::class.java,
+            java.net.URLConnection::class.java,
+            java.net.Socket::class.java,
+            java.net.ServerSocket::class.java,
+            Thread::class.java,
         )
     }
 
@@ -159,7 +191,12 @@ object RhinoClassShutter : ClassShutter {
             is okio.FileHandle,
             is okio.Path,
             is FileSystem,
-            is Path -> return false
+            is Path,
+            is java.net.URL,
+            is java.net.URLConnection,
+            is java.net.Socket,
+            is java.net.ServerSocket,
+            is Thread -> return false
         }
         return visibleToScripts(obj.javaClass.name)
     }

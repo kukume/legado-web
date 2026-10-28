@@ -8,6 +8,7 @@ import type { LoginConfig, LoginV2Render, RowUi } from '@/api/types'
 import { useScriptEffects } from '@/utils/effects'
 import CookieHelp from '@/components/CookieHelp.vue'
 import { flexItemStyle } from '@/utils/flex'
+import { safeHref } from '@/utils/safeUrl'
 import { t } from '@/i18n'
 
 const props = defineProps<{ show: boolean; sourceId: number | null }>()
@@ -320,7 +321,7 @@ async function saveVariable() {
 
       <div v-if="effects.openLinks.value.length" class="links">
         <div class="muted">{{ t('书源请求打开以下网页（若未自动弹出请点击）：') }}</div>
-        <a v-for="u in effects.openLinks.value" :key="u" :href="u" target="_blank" rel="noopener" class="ellipsis">{{ u }}</a>
+        <a v-for="u in effects.openLinks.value" :key="u" :href="safeHref(u)" target="_blank" rel="noopener" class="ellipsis">{{ u }}</a>
       </div>
 
       <n-tabs v-if="config" v-model:value="tab" type="line">
@@ -338,7 +339,7 @@ async function saveVariable() {
                 {{ t('此书源需要在网页中登录。网页版读不到你浏览器里的 Cookie，请在新标签页登录后，把该网站的 Cookie 粘贴到下方。') }}
               </p>
               <div class="saved-row">
-                <n-button type="primary" size="small" tag="a" :href="config.loginUrl" target="_blank" rel="noopener">{{ t('在新标签页打开登录页') }}</n-button>
+                <n-button type="primary" size="small" tag="a" :href="safeHref(config.loginUrl)" target="_blank" rel="noopener">{{ t('在新标签页打开登录页') }}</n-button>
                 <!-- Cookie 很长时省略（不撑出弹窗），完整内容悬停查看 -->
                 <span class="muted small-note saved" :title="cookieInfo?.cookie || ''">
                   {{ t('已保存：') }}<span class="mono">{{ cookieInfo?.cookie || t('无') }}</span>

@@ -191,11 +191,21 @@ object UserPrefs : Table("user_prefs") {
     override val primaryKey = PrimaryKey(userId, key)
 }
 
+/** 用户上传的阅读字体（文件保存在数据目录 fonts/<用户 id>/<id>） */
+object UserFonts : LongIdTable("user_fonts") {
+    val userId = long("user_id").index()
+    val name = varchar("name", 255)
+    /** ttf / otf / woff / woff2 / ttc */
+    val format = varchar("format", 8)
+    val size = long("size")
+    val createdAt = long("created_at")
+}
+
 val allTables = arrayOf(
     Users, InviteCodes, InviteUsages, Settings, BookSources, UserSourcePrefs,
     SourceSubscriptions, EngineCaches, Cookies, BookGroups, Books, Chapters,
     ChapterContents, ReplaceRules, UserPrefs, ApiKeys, TtsEngines, Bookmarks, ReadingStats,
-    DictRules, TxtTocRules,
+    DictRules, TxtTocRules, UserFonts,
 )
 
 /**

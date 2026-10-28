@@ -53,6 +53,8 @@ private val backgroundScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
 data class TxtTocRequest(val tocUrl: String = "")
 
+data class OrderRequest(val ids: List<Long> = emptyList())
+
 fun Route.shelfRoutes(
     shelfService: ShelfService,
     replaceService: ReplaceRuleService,
@@ -68,6 +70,12 @@ fun Route.shelfRoutes(
             /** 打开书籍（可选加入书架） */
             post("/open") {
                 call.respond(shelfService.open(call.user, call.receive<OpenBookRequest>()))
+            }
+            /** 手动排序：请求体为按新顺序排列的书籍 id */
+            put("/order") {
+                val ids = call.receive<OrderRequest>().ids
+                shelfService.saveOrder(call.user, ids.take(5000))
+                call.respond(OkResponse())
             }
             /** 刷新书架所有书籍的目录（后台执行） */
             post("/refresh") {
