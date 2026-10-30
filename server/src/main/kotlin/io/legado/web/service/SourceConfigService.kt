@@ -59,6 +59,8 @@ data class LoginConfig(
     val variableComment: String?,
     /** v1-js 界面脚本执行出错时的信息 */
     val renderError: String? = null,
+    /** 远程浏览器可用：打开登录网址时可以选择在远程浏览器中登录 */
+    val remoteBrowser: Boolean = false,
 )
 
 data class ActionResult(
@@ -114,6 +116,9 @@ data class ExploreKindsResult(val kinds: List<ExploreKindView>, val infoMap: Map
 
 class SourceConfigService(private val sourceService: SourceService) {
 
+    /** 远程浏览器是否可用（由 Application 设置） */
+    var remoteBrowser: () -> Boolean = { false }
+
     private fun ActionResult.withEffects(ctx: EngineContext) = copy(
         messages = ctx.messages.toList(),
         openUrls = ctx.openUrls.distinct(),
@@ -160,8 +165,31 @@ class SourceConfigService(private val sourceService: SourceService) {
                 variable = src.getVariable(),
                 variableComment = src.variableComment,
                 renderError = renderError,
+                remoteBrowser = remoteBrowser(),
             )
         }
+    }
+
+    /**
+     * 登录地址是网址：在远程浏览器中打开登录页（新标签页由前端直接打开），等用户操作完成；
+     * 网页里的 Cookie 由打开网页的流程保存。远程浏览器连不上时只提示，不改用其他方式
+     */
+    suspend fun webLogin(user: UserPrincipal, sourceId: Long): ActionResult {
+        val src = sourceService.get(user, sourceId).source
+        val url = src.loginUrl?.takeIf { it.isAbsUrl() } ?: throw BadRequestException("登录地址不是网址")
+        // 不允许改用本页显示：不弹选择，直接用远程浏览器
+        val ctx = EngineContext(user.id)
+        val r = runEngine(user.id, 120_000, ctx = ctx) {
+            try {
+                io.legado.app.help.source.SourceVerificationHelp.getVerificationResult(
+                    src, url, "登录", useBrowser = true, refetchAfterSuccess = false,
+                )
+                ActionResult(true, null, null)
+            } catch (e: Throwable) {
+                ActionResult(false, e.message ?: e.javaClass.simpleName, null)
+            }
+        }
+        return r.withEffects(ctx)
     }
 
     /** v1：静态 JSON 或脚本生成的界面行（需在引擎上下文中调用） */

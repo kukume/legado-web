@@ -136,6 +136,10 @@ fun Route.sourceRoutes(
                 val body = call.receive<LoginRequestBody>()
                 call.respond(configService.login(call.user, call.longParam("id"), body.info))
             }
+            // 登录地址是网址：在远程浏览器中打开登录页，等用户操作完成
+            post("/{id}/web-login") {
+                call.respond(configService.webLogin(call.user, call.longParam("id")))
+            }
             // 只保存登录界面中填写的内容（不执行 login 函数）
             post("/{id}/login-info") {
                 val body = call.receive<LoginRequestBody>()

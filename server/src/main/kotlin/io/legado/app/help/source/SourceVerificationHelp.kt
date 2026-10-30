@@ -5,6 +5,7 @@ import io.legado.app.exception.NoStackTraceException
 import io.legado.app.exception.UnsupportedOnServerException
 import io.legado.app.help.engine.EngineContext
 import io.legado.app.model.Debug
+import io.legado.app.utils.GSON
 import kotlin.coroutines.CoroutineContext
 
 internal sealed class VerificationResult {
@@ -63,7 +64,7 @@ object SourceVerificationHelp {
         if (!useBrowser) {
             throw UnsupportedOnServerException("图片验证码")
         }
-        requestOpen(source, url, title)
+        requestOpen(source, url, title, html)
         return if (refetchAfterSuccess) {
             VerificationResult.Refetch
         } else {
@@ -82,14 +83,20 @@ object SourceVerificationHelp {
     ) {
         source ?: throw NoStackTraceException("startBrowser parameter source cannot be null")
         require(url.length < 64 * 1024) { "startBrowser parameter url too long" }
-        requestOpen(source, url, title)
+        requestOpen(source, url, title, html)
     }
 
-    /** 交给前端在新标签页打开 */
-    private fun requestOpen(source: BaseSource, url: String, title: String) {
-        if (url.startsWith("http", true)) {
+    /**
+     * 不等待结果地打开网页：在线网址交给前端在新标签页打开；
+     * 书源生成的网页（data:、直接给出的 HTML，如使用教程）在前端的底部弹窗里显示
+     */
+    private fun requestOpen(source: BaseSource, url: String, title: String, html: String?) {
+        if (url.startsWith("http", true) && html.isNullOrBlank()) {
             EngineContext.current?.openUrls?.add(url)
+        } else {
+            val config = GSON.toJson(mapOf("title" to title))
+            handler?.showBrowser(source, url, html, config)
         }
-        Debug.log(source.getKey(), "⇒请求打开网页（$title）: $url")
+        Debug.log(source.getKey(), "⇒请求打开网页（$title）: ${url.take(200)}")
     }
 }

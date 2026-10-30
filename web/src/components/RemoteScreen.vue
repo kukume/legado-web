@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { NButton, NIcon, NSpin, useMessage } from 'naive-ui'
-import { ArrowBackOutline, ArrowForwardOutline, RefreshOutline, KeypadOutline } from '@vicons/ionicons5'
-import { getToken, http } from '@/api/http'
+import { ArrowBackOutline, ArrowForwardOutline, RefreshOutline, KeypadOutline, DesktopOutline, PhonePortraitOutline } from '@vicons/ionicons5'
+import { getToken } from '@/api/http'
 import { t } from '@/i18n'
 
 /**
@@ -10,6 +10,8 @@ import { t } from '@/i18n'
  * 并把点击、滚动、输入转发给浏览器（坐标按网页视口的 CSS 像素换算）
  */
 const props = defineProps<{ token: string }>()
+/** 切换手机版 / 电脑版（电脑版时弹窗加宽） */
+const emit = defineEmits<{ (e: 'mode', desktop: boolean): void }>()
 const message = useMessage()
 
 interface Frame {
@@ -25,44 +27,49 @@ const url = ref('')
 const error = ref('')
 /** 排队中：排在第几位（同一时间只打开一个网页），0 表示没有排队 */
 const queue = ref(0)
+/** 电脑版：网页按电脑屏幕排版（识别到电脑版网页时服务器自动切换，也可以手动切换） */
+const desktop = ref(false)
 const touch = typeof window !== 'undefined' && matchMedia('(pointer: coarse)').matches
 
-let es: EventSource | null = null
-
-/** 屏幕像素密度（1–3）：服务器按它渲染，高分屏上画面不模糊 */
-const screenDpr = () => Math.round(Math.min(3, Math.max(1, window.devicePixelRatio || 1)) * 100) / 100
+let ws: WebSocket | null = null
 
 function connect() {
   const el = stage.value
   const w = Math.round(el?.clientWidth || 400)
   const h = Math.round(el?.clientHeight || 600)
-  // 网页视口跟着画面区域的大小
-  const q = new URLSearchParams({ token: getToken(), w: String(w), h: String(h), dpr: String(screenDpr()) })
-  es = new EventSource(`/api/browser/${encodeURIComponent(props.token)}/screen?${q}`)
-  es.addEventListener('frame', (e) => {
+  // 网页视口跟着画面区域的大小；令牌经 ?token= 传（WebSocket 不能自定义请求头）
+  const q = new URLSearchParams({ token: getToken(), w: String(w), h: String(h) })
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+  ws = new WebSocket(`${proto}://${location.host}/api/browser/${encodeURIComponent(props.token)}/screen?${q}`)
+  ws.onmessage = (e) => {
+    let d: Record<string, string>
     try {
-      frame.value = JSON.parse((e as MessageEvent).data)
-      error.value = ''
+      d = JSON.parse(e.data)
     } catch {
-      /* ignore */
+      return
     }
-  })
-  es.addEventListener('info', (e) => {
-    try {
-      const d = JSON.parse((e as MessageEvent).data) as { type: string; value: string }
+    if (d.k === 'f') {
+      // 画面帧
+      frame.value = { data: d.data, width: Number(d.width), height: Number(d.height) }
+      error.value = ''
+    } else if (d.k === 'i') {
+      // 通知
       if (d.type === 'url') url.value = d.value
+      else if (d.type === 'mode') {
+        desktop.value = d.value === 'desktop'
+        emit('mode', desktop.value)
+      } else if (d.type === 'auto') message.info(t('这是电脑版网页，已切换到电脑版'))
       else if (d.type === 'queue') queue.value = Number(d.value) || 0
       else if (d.type === 'ready') queue.value = 0
       else if (d.type === 'error') {
         error.value = d.value
-        es?.close()
+        ws?.close()
       } else if (d.type === 'dialog' && d.value) message.info(t('网页提示：{0}', [d.value]))
       else if (d.type === 'blocked') message.warning(t('只能打开书源自己网站的网页，已阻止跳转到 {0}', [d.value]))
-    } catch {
-      /* ignore */
+      else if (d.type === 'app') message.warning(t('网页想打开手机 App（{0}），远程浏览器中无法打开，已忽略', [d.value]))
     }
-  })
-  es.onerror = () => {
+  }
+  ws.onerror = () => {
     if (!frame.value && !error.value) error.value = t('无法连接到服务器上的浏览器')
   }
 }
@@ -76,10 +83,10 @@ const ro = typeof ResizeObserver !== 'undefined'
       resizeTimer = setTimeout(() => {
         const el = stage.value
         if (!el || !el.clientWidth || !el.clientHeight) return
-        const size = `${el.clientWidth}x${el.clientHeight}@${screenDpr()}`
+        const size = `${el.clientWidth}x${el.clientHeight}`
         if (size === lastSize) return
         lastSize = size
-        send({ type: 'resize', width: el.clientWidth, height: el.clientHeight, dpr: screenDpr() })
+        send({ type: 'resize', width: el.clientWidth, height: el.clientHeight })
       }, 300)
     })
   : null
@@ -88,22 +95,21 @@ onMounted(() =>
   nextTick(() => {
     connect()
     if (stage.value) {
-      lastSize = `${stage.value.clientWidth}x${stage.value.clientHeight}@${screenDpr()}`
+      lastSize = `${stage.value.clientWidth}x${stage.value.clientHeight}`
       ro?.observe(stage.value)
     }
   }),
 )
 onBeforeUnmount(() => {
-  es?.close()
+  ws?.close()
   ro?.disconnect()
   if (resizeTimer) clearTimeout(resizeTimer)
 })
 
-// ---------------- 转发操作（按顺序发送，避免点击的按下、抬起乱序） ----------------
+// ---------------- 转发操作（和画面走同一条 WebSocket） ----------------
 
-let chain: Promise<unknown> = Promise.resolve()
 function send(input: Record<string, unknown>) {
-  chain = chain.then(() => http.post(`/api/browser/${encodeURIComponent(props.token)}/input`, input).catch(() => {}))
+  if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(input))
 }
 
 /** 屏幕坐标换算成网页视口的坐标 */
@@ -224,6 +230,10 @@ function onPaste(e: ClipboardEvent) {
   if (text) send({ type: 'text', text })
 }
 
+function toggleDesktop() {
+  send({ type: 'viewMode', action: desktop.value ? 'mobile' : 'desktop' })
+}
+
 function showKeyboard() {
   kb.value?.focus()
 }
@@ -242,6 +252,9 @@ function showKeyboard() {
         <template #icon><n-icon :component="RefreshOutline" /></template>
       </n-button>
       <span class="mono ellipsis url" :title="url">{{ url }}</span>
+      <n-button size="tiny" quaternary :title="desktop ? t('切换到手机版') : t('切换到电脑版')" @click="toggleDesktop">
+        <template #icon><n-icon :component="desktop ? PhonePortraitOutline : DesktopOutline" /></template>
+      </n-button>
       <n-button v-if="touch" size="tiny" quaternary :title="t('输入文字')" @click="showKeyboard">
         <template #icon><n-icon :component="KeypadOutline" /></template>
       </n-button>

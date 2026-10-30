@@ -38,6 +38,28 @@ object RemoteCdp {
         }
     }
 
+    /** 打开网页前的快速检查用：超时短，浏览器没响应时尽快提示，而不是打开网页后才报连接超时 */
+    private val pingClient = client.newBuilder().connectTimeout(3, TimeUnit.SECONDS).readTimeout(3, TimeUnit.SECONDS).build()
+
+    /** 浏览器能否连接：http 地址请求 /json/version，ws 地址只检查端口能否连上。失败时抛出原因 */
+    fun ping(endpoint: String) {
+        val e = endpoint.trim().trimEnd('/')
+        if (e.startsWith("ws://", true) || e.startsWith("wss://", true)) {
+            val authority = e.substringAfter("://").substringBefore('/')
+            val host = authority.substringBeforeLast(':').removePrefix("[").removeSuffix("]")
+            val port = authority.substringAfterLast(':', "").toIntOrNull() ?: if (e.startsWith("wss", true)) 443 else 80
+            java.net.Socket().use { it.connect(java.net.InetSocketAddress(host, port), 3000) }
+            return
+        }
+        val base = (if (e.startsWith("http", true)) e else "http://$e").toHttpUrl()
+        val req = Request.Builder().url(base.newBuilder().addPathSegments("json/version").build())
+            .apply { hostHeader(base.host)?.let { header("Host", it) } }
+            .build()
+        pingClient.newCall(req).execute().use { res ->
+            if (!res.isSuccessful) error("浏览器调试地址返回 ${res.code}")
+        }
+    }
+
     /**
      * 地址（http://host:9222 或 ws://host:9222/devtools/browser/…）→ 浏览器的 WebSocket 地址和需要使用的 Host 请求头
      */

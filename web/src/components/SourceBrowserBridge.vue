@@ -64,6 +64,8 @@ const message = useMessage()
 
 const queue = ref<BrowserEvent[]>([])
 const current = computed(() => queue.value[0] ?? null)
+/** 远程浏览器处于电脑版：弹窗加宽 */
+const remoteDesktop = ref(false)
 const submitting = ref(false)
 const captcha = ref('')
 /** 其他网站的网页（如番茄登录）：用户手动填写登录后的 Cookie */
@@ -119,6 +121,11 @@ function onEvent(ev: BrowserEvent) {
         t('「{0}」需要打开网页才能继续（如人机验证、登录），但服务器没有配置远程浏览器。请联系管理员在“系统设置”中设置浏览器调试地址并开启远程浏览器。', [ev.sourceName]),
         { duration: 8000, closable: true },
       )
+    } else if (ev.title === 'remote-browser-unreachable') {
+      message.error(
+        t('「{0}」需要打开网页，但服务器上的远程浏览器无法连接：{1}。请联系管理员检查浏览器是否在运行、“系统设置”中的浏览器调试地址是否正确。', [ev.sourceName, ev.url]),
+        { duration: 10000, closable: true },
+      )
     }
     return
   }
@@ -138,6 +145,7 @@ function onEvent(ev: BrowserEvent) {
 watch(current, (ev, old) => {
   // 同一个网页：只有从“选择打开方式”变成正式网页时才重新准备
   if (ev?.token === old?.token && !(old?.choose && !ev?.choose)) return
+  remoteDesktop.value = false
   captcha.value = ''
   cookie.value = ''
   openedExternal.value = false
@@ -145,10 +153,6 @@ watch(current, (ev, old) => {
   submitting.value = false
   stack.value = []
   proxyError.value = ''
-  // 书源自己网站的网页：直接在这里加载（书源之后要读取 Cookie 的登录页仍默认在新标签页打开）
-  if (ev?.type === 'browser' && !ev.remote && ev.proxy && ev.html == null && /^https?:/i.test(ev.url) && ev.needCookie !== true) {
-    loadProxied('modal', ev.token, ev.url)
-  }
 })
 
 // ---------------- 网页 ----------------
@@ -499,7 +503,7 @@ const captchaSrc = computed(() =>
     :show="!!current"
     preset="card"
     :title="current ? `${current.title} · ${current.sourceName}` : ''"
-    :style="current?.type === 'captcha' || current?.choose ? 'max-width: 460px' : current?.remote ? 'width: min(480px, 100vw - 24px)' : externalUrl ? 'width: min(560px, 100vw - 24px)' : 'width: min(960px, 100vw - 24px)'"
+    :style="current?.type === 'captcha' || current?.choose ? 'max-width: 460px' : current?.remote ? (remoteDesktop ? 'width: min(1100px, 100vw - 24px)' : 'width: min(480px, 100vw - 24px)') : externalUrl ? 'width: min(560px, 100vw - 24px)' : 'width: min(960px, 100vw - 24px)'"
     :mask-closable="false"
     :close-on-esc="false"
     :closable="false"
@@ -510,11 +514,16 @@ const captchaSrc = computed(() =>
       <p>{{ t('请选择打开方式：') }}</p>
       <div class="choose-buttons">
         <n-button type="primary" :loading="choosing" @click="chooseMode('remote')">{{ t('远程浏览器') }}</n-button>
-        <n-button :disabled="choosing" @click="chooseMode('page')">{{ t('浏览器渲染') }}</n-button>
+        <n-button :disabled="choosing" @click="chooseMode('page')">{{ t('新标签页打开') }}</n-button>
       </div>
-      <p class="muted small">{{ t('远程浏览器：在服务器上的真实浏览器里打开网页，适合人机验证、需要登录的网站。浏览器渲染：由服务器取回网页，在你当前的浏览器里显示，打开更快，但部分网站可能无法正常使用。') }}</p>
+      <p class="muted small">{{ t('远程浏览器：在服务器上的真实浏览器里打开网页，登录后的 Cookie 由服务器直接取回，适合人机验证、需要登录的网站。新标签页打开：在你自己的浏览器里打开网页，需要读取登录状态的书源要你手动粘贴 Cookie。') }}</p>
     </div>
-    <remote-screen v-else-if="current?.type === 'browser' && current.remote" :key="current.token" :token="current.token" />
+    <remote-screen
+      v-else-if="current?.type === 'browser' && current.remote"
+      :key="current.token"
+      :token="current.token"
+      @mode="(d: boolean) => (remoteDesktop = d)"
+    />
     <template v-else-if="current?.type === 'browser'">
       <div v-if="topProxied" class="proxy-bar">
         <n-button v-if="pages.length > 1" size="tiny" quaternary @click="backProxied">{{ t('返回') }}</n-button>
@@ -556,7 +565,6 @@ const captchaSrc = computed(() =>
           <div v-if="proxyError" class="proxy-error">{{ t('在本页加载失败：{0}', [proxyError]) }}</div>
           <div class="external-url">
             <n-button type="primary" @click="openExternal">{{ openedExternal ? t('再次打开') : t('在新标签页打开') }}</n-button>
-            <n-button v-if="current.proxy" secondary :title="t('由服务器加载网页后在这里显示，网页中的请求带上书源的 Cookie')" @click="loadProxied('modal', current.token, current.url)">{{ t('在本页打开') }}</n-button>
             <span class="mono ellipsis" :title="externalUrl || ''">{{ externalUrl }}</span>
             <n-button size="tiny" quaternary @click="copyUrl">{{ t('复制链接') }}</n-button>
           </div>

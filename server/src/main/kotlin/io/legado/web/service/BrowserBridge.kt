@@ -130,7 +130,7 @@ class BrowserBridge : SourceVerificationHelp.Handler {
     var remoteEnabled: () -> Boolean = { false }
 
     /** 远程浏览器可用：设置了浏览器调试地址，并且开启了“使用远程浏览器” */
-    private fun remoteAvailable() = remoteBrowser != null && remoteEnabled()
+    fun remoteAvailable() = remoteBrowser != null && remoteEnabled()
 
     /** 远程网页：排队时 session 为 null；轮到后打开，打开失败时 error 不为空 */
     private class RemoteEntry(val userId: Long) {
@@ -180,6 +180,8 @@ class BrowserBridge : SourceVerificationHelp.Handler {
         private const val ABANDON_MS = 15_000L
         /** notice 事件的原因：需要远程浏览器（前端据此显示本地化的提示） */
         const val NOTICE_REMOTE_REQUIRED = "remote-browser-required"
+        /** notice 事件的原因：远程浏览器连接不上（url 字段为失败原因） */
+        const val NOTICE_REMOTE_UNREACHABLE = "remote-browser-unreachable"
         private const val MAX_HTML = 4 * 1024 * 1024
         private const val SESSION_TTL = 2 * 3600_000L
         private const val MAX_PROXY_BODY = 2 * 1024 * 1024
@@ -367,7 +369,8 @@ class BrowserBridge : SourceVerificationHelp.Handler {
             val entry = remoteSessions[token] ?: throw NotFoundException("网页已关闭，请重新打开")
             if (entry.userId != userId) throw ForbiddenException()
             entry.session?.let { return it }
-            if (entry.settled) throw BadRequestException("无法打开网页：${entry.error ?: "已取消"}")
+            // 打开失败都是浏览器这边的问题（连接、建标签页；网页本身加载失败会显示在画面里）
+            if (entry.settled) throw BadRequestException(entry.error?.let { "远程浏览器出错：$it" } ?: "已取消")
             onQueue(remoteBrowser?.queuePosition(token) ?: 0)
             kotlinx.coroutines.delay(1000)
         }
@@ -400,15 +403,26 @@ class BrowserBridge : SourceVerificationHelp.Handler {
             broadcast(userId, BrowserEvent("notice", token, source.getTag(), source.getKey(), NOTICE_REMOTE_REQUIRED), ctx.clientId)
             return url to ""
         }
-        val remoteReq = if (useBrowser && html.isNullOrBlank()) remoteRequest(source, url) else null
+        val wantedRemote = if (useBrowser && html.isNullOrBlank()) remoteRequest(source, url) else null
+        // 打开前先检查远程浏览器能否连接：连不上时提示浏览器有问题，不打开网页
+        // （否则网页里显示连接超时，分不清是网页打不开还是浏览器有问题）。登录、变量设置中改为下载网页交给前端显示
+        val remoteError = wantedRemote?.let { remoteBrowser?.checkReachable() }
+        if (remoteError != null) {
+            broadcast(userId, BrowserEvent("notice", token, source.getTag(), source.getKey(), NOTICE_REMOTE_UNREACHABLE, url = remoteError), ctx.clientId)
+            if (!ctx.allowPageFallback) return url to ""
+        }
+        val remoteReq = wantedRemote.takeIf { remoteError == null }
         // 登录、变量设置中两种方式都可用：先让用户选择
         val choose = remoteReq != null && ctx.allowPageFallback
         val pageTitle = title.ifBlank { "书源网页" }
         /** 下载网页交给前端显示的事件（会建立网页请求的转发权限，选定后才调用） */
         fun pageEvent(): BrowserEvent {
             val (pageUrl, pageHtml) = resolveSourceUrl(source, url, html) ?: pageContent(url, html)
-            val needCookie = if (pageHtml == null && pageUrl.startsWith("http", true)) BrowserCookieHint.needsCookie(source) else null
-            val proxy = openSession(token, userId, source, pageUrl, pageHtml)
+            val online = pageHtml == null && pageUrl.startsWith("http", true)
+            val needCookie = if (online) BrowserCookieHint.needsCookie(source) else null
+            // 在线网址：在新标签页打开（下载后在本页显示意义不大，大多数网站也拿不到登录状态）；
+            // 只有书源自己生成的网页（data:、POST 取回的 HTML）在本页渲染
+            val proxy = if (online) false else openSession(token, userId, source, pageUrl, pageHtml)
             return BrowserEvent("browser", token, source.getTag(), source.getKey(), pageTitle, pageUrl, pageHtml, needCookie = needCookie, proxy = proxy)
         }
         val event = when {
@@ -459,7 +473,7 @@ class BrowserBridge : SourceVerificationHelp.Handler {
         val ctx = EngineContext.current ?: return false
         if (ctx.userId == 0L || !hasListener(ctx.userId)) return false
         // 普通网址由前端直接加载（网页能拿到自己的地址参数和存储）；其他情况交给前端显示源码
-        val (pageUrl, pageHtml) = if (url.startsWith("http", true)) url to null else pageContent(url, html)
+        val (pageUrl, pageHtml) = if (url.startsWith("http", true) && html.isNullOrBlank()) url to null else pageContent(url, html)
         val title = runCatching { GSON.fromJsonObject<Map<String, Any?>>(config).getOrNull()?.get("title") as? String }.getOrNull()
         val token = UUID.randomUUID().toString()
         val event = BrowserEvent(

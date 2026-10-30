@@ -100,7 +100,8 @@ export default defineConfig({
   server: {
     port: 15173,
     proxy: {
-      '/api': { target: api, changeOrigin: true },
+      // ws: true —— 远程浏览器的画面走 WebSocket
+      '/api': { target: api, changeOrigin: true, ws: true },
       '/openapi': { target: api, changeOrigin: true },
     },
   },

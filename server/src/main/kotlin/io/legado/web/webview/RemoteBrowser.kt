@@ -6,7 +6,6 @@ import io.legado.web.security.NetworkGuard
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -55,11 +54,41 @@ class RemoteBrowserManager(
         val (wsUrl, host) = withContext(Dispatchers.IO) { RemoteCdp.resolve(addr) }
         val conn = CdpWebViewProvider.CdpConnection(wsUrl, host)
         conn.awaitOpen()
+        // 网页弹出的新标签页（target=_blank、window.open）：交给打开它的网页处理（见 RemoteSession.onPopup）
+        conn.addListener("") { method, params -> onBrowserEvent(method, params) }
+        conn.send("Target.setDiscoverTargets", JsonObject().apply { addProperty("discover", true) })
         connection = conn
         connectedTo = addr
         logger.info("远程浏览器已连接: {}", addr)
         contexts.cleanup(addr, conn)
         conn to addr
+    }
+
+    /**
+     * 打开网页前检查浏览器能否连接（在脚本线程中调用）：已有可用的连接时直接通过；
+     * 连不上时返回原因，由调用方提示“浏览器有问题”，避免打开网页后才报连接超时，分不清是网页还是浏览器的问题
+     */
+    fun checkReachable(): String? {
+        val addr = cdp() ?: return "没有设置浏览器"
+        if (connection?.isOpen == true && connectedTo == addr) return null
+        return try {
+            RemoteCdp.ping(addr)
+            null
+        } catch (e: Exception) {
+            logger.warn("远程浏览器无法连接 {}: {}", addr, e.message)
+            e.message ?: e.javaClass.simpleName
+        }
+    }
+
+    /** 打开的网页（按浏览器上下文）：每个网页独占一个上下文，上下文里出现的其他标签页就是它弹出的 */
+    private val byContext = java.util.concurrent.ConcurrentHashMap<String, RemoteSession>()
+
+    private fun onBrowserEvent(method: String, params: JsonObject) {
+        if (method != "Target.targetCreated" && method != "Target.targetInfoChanged") return
+        val info = params.getAsJsonObject("targetInfo") ?: return
+        if (info.get("type")?.asString != "page") return
+        val session = byContext[info.get("browserContextId")?.asString ?: return] ?: return
+        session.onPopup(info.get("targetId").asString, info.get("url")?.asString.orEmpty())
     }
 
     // ---------------- 排队：同一时间只打开一个网页 ----------------
@@ -146,6 +175,13 @@ class RemoteBrowserManager(
             addProperty("disposeOnDetach", true)
         }).get("browserContextId").asString
         contexts.add(addr, contextId)
+        // 远程浏览器里不下载文件（网页的“下载 App”等）
+        runCatching {
+            conn.send("Browser.setDownloadBehavior", JsonObject().apply {
+                addProperty("behavior", "deny")
+                addProperty("browserContextId", contextId)
+            })
+        }
         val targetId = conn.send("Target.createTarget", JsonObject().apply {
             addProperty("url", "about:blank")
             addProperty("browserContextId", contextId)
@@ -154,7 +190,11 @@ class RemoteBrowserManager(
             addProperty("targetId", targetId)
             addProperty("flatten", true)
         }).get("sessionId").asString
-        val session = RemoteSession(conn, contextId, targetId, sessionId, req, scope) { contexts.remove(addr, contextId) }
+        val session = RemoteSession(conn, contextId, targetId, sessionId, req, scope) {
+            byContext.remove(contextId)
+            contexts.remove(addr, contextId)
+        }
+        byContext[contextId] = session
         try {
             session.start()
         } catch (e: Exception) {
@@ -168,6 +208,44 @@ class RemoteBrowserManager(
         runCatching { connection?.close() }
     }
 }
+
+/**
+ * 注入到网页的脚本：在新标签页打开的链接（target=_blank、<base target>）、表单和 window.open 改为在当前页打开。
+ * 只处理主页面；指向页面里某个内嵌框架的 target 不改
+ */
+private const val SAME_TAB_JS = """(() => {
+  if (window.top !== window) return;
+  const sameTab = (t) => {
+    if (!t || /^_(self|top|parent)$/i.test(t)) return false;
+    if (/^_blank$/i.test(t)) return true;
+    // 命名的目标：页面里有同名的框架时是在框架里打开，不改
+    return !document.querySelector('iframe[name="' + CSS.escape(t) + '"],frame[name="' + CSS.escape(t) + '"]');
+  };
+  const baseTarget = () => (document.querySelector('base[target]') || {}).target || '';
+  const fix = (el) => { if (el && sameTab(el.getAttribute('target') || baseTarget())) el.setAttribute('target', '_self'); };
+  document.addEventListener('click', (e) => fix(e.target && e.target.closest && e.target.closest('a[href],area[href]')), true);
+  document.addEventListener('submit', (e) => fix(e.target), true);
+  window.open = function (url) {
+    if (url != null && String(url) !== '') {
+      try { location.href = new URL(String(url), location.href).href; } catch (err) {}
+    }
+    return window;
+  };
+})();"""
+
+/**
+ * 注入到网页（含内嵌框架）的脚本：拦下打开 App 的链接（如 dragon1967://、intent://）。
+ * 浏览器打开这类链接时会弹出“要打开此应用吗”的确认框，确认框挡住整个网页，之后点击、滚动都传不进网页；
+ * 这类链接也不经过请求拦截。用 Navigation API 在跳转前取消（服务器从 Page.frameScheduledNavigation 得知并转告用户）
+ */
+private const val APP_LINK_JS = """(() => {
+  if (!window.navigation) return;
+  navigation.addEventListener('navigate', (e) => {
+    const url = e.destination && e.destination.url;
+    if (!url || /^(https?|about|data|blob|javascript):/i.test(url) || !e.cancelable) return;
+    e.preventDefault();
+  });
+})();"""
 
 /** 一个打开的远程网页 */
 class RemoteSession internal constructor(
@@ -186,8 +264,8 @@ class RemoteSession internal constructor(
     /** 最新的一帧（推送慢时只保留最新的，不积压） */
     val frames = MutableStateFlow<Frame?>(null)
 
-    /** 其他通知：地址变化、网页弹出的对话框 */
-    val events = Channel<Pair<String, String>>(Channel.BUFFERED)
+    /** 其他通知：地址变化、网页弹出的对话框等（推给所有正在看画面的连接，如同一用户的多个标签页） */
+    val events = kotlinx.coroutines.flow.MutableSharedFlow<Pair<String, String>>(extraBufferCapacity = 64)
 
     @Volatile
     var currentUrl: String = req.url
@@ -198,11 +276,38 @@ class RemoteSession internal constructor(
 
     /** 等到网页关闭（用户完成、取消或等待超时） */
     suspend fun awaitClosed() = closedSignal.await()
-    /** 网页视口：跟着前端弹窗里画面区域的大小（打开时和弹窗大小变化时由前端告知），按手机模式排版 */
+    /** 画面区域的大小（CSS 像素，打开时和弹窗大小变化时由前端告知）：手机版的视口就是它 */
     private var viewport = 412 to 860
 
-    /** 像素密度：跟着用户屏幕的 devicePixelRatio（1–3），高分屏上画面不模糊 */
-    private var scale = 2.0
+    /**
+     * 电脑版：视口按电脑屏幕的宽度（[DESKTOP_WIDTH]）排版、关闭手机模式和触摸模拟，画面按比例缩小显示。
+     * 只有电脑版的网页（没有适配手机）在手机视口里会被截断或缩得很小，点不到；识别到时自动切换
+     */
+    @Volatile
+    var desktop = false
+        private set
+
+    /** 用户手动切换过：不再自动切换 */
+    @Volatile
+    private var modeLocked = false
+
+    private companion object {
+        const val DESKTOP_WIDTH = 1280
+
+        /** 识别电脑版网页：没有声明适配手机（viewport 的 width=device-width），或页面内容明显比视口宽 */
+        const val DETECT_DESKTOP_JS = """(() => {
+  if (!document.body || !document.body.children.length) return false;
+  const m = document.querySelector('meta[name="viewport" i]');
+  const fits = !!m && /width\s*=\s*device-width/i.test(m.content || '');
+  return !fits || document.documentElement.scrollWidth > window.innerWidth * 1.15;
+})()"""
+    }
+
+    /** 当前模式下网页视口的大小（电脑版的高度按画面区域的比例） */
+    private fun metrics(): Pair<Int, Int> {
+        val (w, h) = viewport
+        return if (desktop) DESKTOP_WIDTH to (DESKTOP_WIDTH * h / w).coerceIn(600, 2400) else w to h
+    }
 
     private suspend fun cmd(method: String, params: JsonObject = JsonObject()) = conn.send(method, params, sessionId)
     private fun cmdAsync(method: String, params: JsonObject = JsonObject()) = conn.sendAsync(method, params, sessionId)
@@ -232,8 +337,6 @@ class RemoteSession internal constructor(
         // 由浏览器自己生成的请求头不要覆盖
         headers.keys.removeIf { k -> listOf("User-Agent", "Cookie", "Content-Type", "Content-Length", "Host", "Accept-Encoding", "Connection", "Referer").any { it.equals(k, true) } }
         // User-Agent 不用书源的，始终用浏览器自己的（与浏览器的其他特征一致）
-        // 手机的触摸屏：网页按触摸设备处理（navigator.maxTouchPoints、pointer: coarse）
-        runCatching { cmd("Emulation.setTouchEmulationEnabled", JsonObject().apply { addProperty("enabled", true); addProperty("maxTouchPoints", 5) }) }
         if (headers.isNotEmpty()) {
             cmd("Network.setExtraHTTPHeaders", JsonObject().apply {
                 add("headers", JsonObject().apply { headers.forEach { (k, v) -> addProperty(k, v) } })
@@ -241,6 +344,9 @@ class RemoteSession internal constructor(
         }
         applyViewport()
         setCookies()
+        // 画面里只有一个标签页：链接、表单、window.open 要在新标签页打开的，改为在当前页打开
+        runCatching { cmd("Page.addScriptToEvaluateOnNewDocument", JsonObject().apply { addProperty("source", SAME_TAB_JS) }) }
+        runCatching { cmd("Page.addScriptToEvaluateOnNewDocument", JsonObject().apply { addProperty("source", APP_LINK_JS) }) }
         // 拦截请求：第一个页面请求按书源的方式发（POST）；主页面跳转限制在书源的网站内；其余请求做内网防护检查
         cmd("Fetch.enable", JsonObject().apply {
             add("patterns", JsonArray().apply { add(JsonObject().apply { addProperty("urlPattern", "*") }) })
@@ -253,70 +359,68 @@ class RemoteSession internal constructor(
     }
 
     private suspend fun applyViewport() {
-        val (w, h) = viewport
+        val (w, h) = metrics()
         cmd("Emulation.setDeviceMetricsOverride", JsonObject().apply {
             addProperty("width", w)
             addProperty("height", h)
-            // 按用户屏幕的像素密度渲染：画面上的文字清晰
-            addProperty("deviceScaleFactor", scale)
-            addProperty("mobile", true)
+            // 手机版 2 倍像素密度：网页按手机屏幕处理（画面本身由 screencast 按视口大小输出）
+            addProperty("deviceScaleFactor", if (desktop) 1 else 2)
+            addProperty("mobile", !desktop)
         })
+        // 手机版模拟触摸屏：网页按触摸设备处理（navigator.maxTouchPoints、pointer: coarse）
+        runCatching {
+            cmd("Emulation.setTouchEmulationEnabled", JsonObject().apply {
+                addProperty("enabled", !desktop)
+                addProperty("maxTouchPoints", 5)
+            })
+        }
+    }
+
+    /** 切换手机版 / 电脑版：重新排版并重新加载网页（很多网站按加载时的屏幕决定版式） */
+    private suspend fun setDesktop(on: Boolean, auto: Boolean = false) {
+        if (desktop == on) return
+        desktop = on
+        applyViewport()
+        startScreencast()
+        events.tryEmit("mode" to if (on) "desktop" else "mobile")
+        if (auto) events.tryEmit("auto" to "desktop")
+        cmd("Page.reload")
+    }
+
+    /** 网页加载完：手机版下识别到电脑版网页时自动切换到电脑版 */
+    private fun detectDesktop() {
+        if (desktop || modeLocked || !currentUrl.startsWith("http", true)) return
+        scope.launch {
+            val isDesktopPage = runCatching { evaluate(DETECT_DESKTOP_JS) }.getOrNull() == "true"
+            if (isDesktopPage && !desktop && !modeLocked && !closed.get()) {
+                runCatching { setDesktop(true, auto = true) }
+            }
+        }
     }
 
     @Volatile
     private var screencasting = false
 
     /**
-     * 开始（或按新的大小重新开始）监听画面变化。
-     * 无头浏览器的 screencast 帧总是按 CSS 像素输出（不管像素密度），在高分屏上放大显示会模糊，
-     * 所以它只用来得知“画面变了”，真正推给用户的是按像素密度截的图（见 [captureSharp]）
+     * 开始（或按新的大小重新开始）推送画面：浏览器合成画面时直接推送 screencast 帧（JPEG），
+     * 推给用户时只保留最新的一帧，不积压
      */
-    private suspend fun startScreencast() {
+    /** 调整大小、切换电脑版可能同时重新开始推送：依次执行（否则浏览器报 Screencast is already active） */
+    private val screencastLock = Mutex()
+
+    private suspend fun startScreencast() = screencastLock.withLock {
         if (screencasting) runCatching { cmd("Page.stopScreencast") }
+        // 画面不超过画面区域的 2 倍像素（电脑版的视口很大，按原尺寸推送太占流量）
+        val (mw, mh) = metrics()
         val (w, h) = viewport
         cmd("Page.startScreencast", JsonObject().apply {
             addProperty("format", "jpeg")
-            addProperty("quality", 70)
-            addProperty("maxWidth", w)
-            addProperty("maxHeight", h)
+            addProperty("quality", 80)
+            addProperty("maxWidth", minOf(mw, w * 2))
+            addProperty("maxHeight", minOf(mh, h * 2))
             addProperty("everyNthFrame", 1)
         })
         screencasting = true
-    }
-
-    /** 正在截高清图；截图期间画面又变了时置 [sharpDirty]，截完再截一次（同一时间只截一张） */
-    private val sharpBusy = AtomicBoolean(false)
-
-    @Volatile
-    private var sharpDirty = false
-
-    /** 最新的低清帧（截图失败时用它） */
-    @Volatile
-    private var lastCast: Frame? = null
-
-    /** 画面变了：按像素密度截一张高清图推给用户 */
-    private fun captureSharp() {
-        sharpDirty = true
-        if (!sharpBusy.compareAndSet(false, true)) return
-        scope.launch {
-            try {
-                while (sharpDirty && !closed.get()) {
-                    sharpDirty = false
-                    val cast = lastCast ?: break
-                    val shot = runCatching {
-                        cmd("Page.captureScreenshot", JsonObject().apply {
-                            addProperty("format", "jpeg")
-                            addProperty("quality", 85)
-                        }).get("data")?.asString
-                    }.getOrNull()
-                    frames.value = if (shot != null) cast.copy(data = shot) else cast
-                }
-            } finally {
-                sharpBusy.set(false)
-                // 刚结束时又来了新的变化：重新开始
-                if (sharpDirty && !closed.get()) captureSharp()
-            }
-        }
     }
 
     private suspend fun setCookies() {
@@ -340,30 +444,73 @@ class RemoteSession internal constructor(
             "Page.screencastFrame" -> {
                 cmdAsync("Page.screencastFrameAck", JsonObject().apply { addProperty("sessionId", params.get("sessionId").asInt) })
                 val meta = params.getAsJsonObject("metadata")
-                val cast = Frame(
+                frames.value = Frame(
                     params.get("data").asString,
                     meta.get("deviceWidth").asDouble,
                     meta.get("deviceHeight").asDouble,
                     meta.get("offsetTop")?.asDouble ?: 0.0,
                 )
-                lastCast = cast
-                // 1 倍屏直接用低清帧（已经是原始清晰度），否则截高清图
-                if (scale <= 1.0) frames.value = cast else captureSharp()
             }
+            "Page.loadEventFired" -> detectDesktop()
             "Page.frameNavigated" -> {
                 val frame = params.getAsJsonObject("frame")
                 if (frame != null && !frame.has("parentId")) {
                     currentUrl = frame.get("url").asString
-                    events.trySend("url" to currentUrl)
+                    events.tryEmit("url" to currentUrl)
                 }
             }
             // 网页的 alert / confirm：转告用户并自动确认（否则网页会一直卡住）
             "Page.javascriptDialogOpening" -> {
-                events.trySend("dialog" to (params.get("message")?.asString ?: ""))
+                events.tryEmit("dialog" to (params.get("message")?.asString ?: ""))
                 cmdAsync("Page.handleJavaScriptDialog", JsonObject().apply { addProperty("accept", true) })
             }
             "Fetch.requestPaused" -> onRequestPaused(params)
+            // 网页想打开 App（已被注入的脚本取消）：告诉用户，只显示协议名。同一个协议短时间内只提示一次
+            "Page.frameScheduledNavigation", "Page.frameRequestedNavigation" -> {
+                val scheme = params.get("url")?.asString.orEmpty().substringBefore(':', "").lowercase()
+                if (scheme.isNotEmpty() && scheme !in webSchemes) {
+                    val now = System.currentTimeMillis()
+                    if (scheme != lastApp.first || now - lastApp.second > 3000) {
+                        lastApp = scheme to now
+                        events.tryEmit("app" to scheme)
+                    }
+                }
+            }
         }
+    }
+
+    /** 网页本身的协议，其他协议（dragon1967:、intent: 等）是打开 App */
+    private val webSchemes = setOf("http", "https", "about", "data", "blob", "javascript", "file", "chrome-error")
+
+    @Volatile
+    private var lastApp = "" to 0L
+
+    /** 已处理的弹出标签页 */
+    private val popups = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    /**
+     * 网页弹出了新标签页（注入的脚本没拦住的，如内嵌框架里的链接）：关掉它，改为在当前页打开它的网址。
+     * 新标签页没有请求拦截，不能让它留着（不受网站范围和内网防护的限制）。
+     * 刚创建时网址可能还是空白，等网址出来再处理；一直没有网址的 2 秒后直接关掉
+     */
+    internal fun onPopup(popupId: String, url: String) {
+        if (popupId == targetId || closed.get() || popupId in popups) return
+        val real = url.startsWith("http", true)
+        if (!real) {
+            scope.launch {
+                kotlinx.coroutines.delay(2000)
+                if (popups.add(popupId)) closeTarget(popupId)
+            }
+            return
+        }
+        if (!popups.add(popupId)) return
+        closeTarget(popupId)
+        // 当前页打开：跳转同样受网站范围限制（不允许时提示已阻止）
+        cmdAsync("Page.navigate", JsonObject().apply { addProperty("url", url) })
+    }
+
+    private fun closeTarget(id: String) {
+        conn.sendAsync("Target.closeTarget", JsonObject().apply { addProperty("targetId", id) })
     }
 
     private fun onRequestPaused(params: JsonObject) {
@@ -393,7 +540,7 @@ class RemoteSession internal constructor(
                 addProperty("requestId", requestId)
                 addProperty("errorReason", "Aborted")
             })
-            events.trySend("blocked" to (runCatching { java.net.URI(reqUrl).host }.getOrNull() ?: reqUrl))
+            events.tryEmit("blocked" to (runCatching { java.net.URI(reqUrl).host }.getOrNull() ?: reqUrl))
             return
         }
         if (!NetworkGuard.isEnabled) {
@@ -418,9 +565,9 @@ class RemoteSession internal constructor(
 
     /** 用户的操作（坐标为网页视口的 CSS 像素） */
     data class Input(
-        /** mouse / wheel / text / key / back / forward / reload / resize */
+        /** mouse / wheel / text / key / back / forward / reload / resize / viewMode */
         val type: String = "",
-        /** mouse：down / up / move */
+        /** mouse：down / up / move；viewMode：desktop / mobile */
         val action: String = "",
         val x: Double = 0.0,
         val y: Double = 0.0,
@@ -432,10 +579,12 @@ class RemoteSession internal constructor(
         val keyCode: Int = 0,
         val width: Int = 0,
         val height: Int = 0,
-        /** resize：用户屏幕的 devicePixelRatio */
-        val dpr: Double = 0.0,
     )
 
+    /**
+     * 转发操作：点击、滚动、按键只发送不等回复（按顺序发出，浏览器按顺序执行）。
+     * 等回复的话，某个操作卡住（如点击后网页跳转被拦下）时后面的操作都会排在它后面，看起来网页操作不了
+     */
     suspend fun input(e: Input) {
         if (closed.get()) return
         when (e.type) {
@@ -445,7 +594,7 @@ class RemoteSession internal constructor(
                     "up" -> "mouseReleased"
                     else -> "mouseMoved"
                 }
-                cmd("Input.dispatchMouseEvent", JsonObject().apply {
+                cmdAsync("Input.dispatchMouseEvent", JsonObject().apply {
                     addProperty("type", type)
                     addProperty("x", e.x)
                     addProperty("y", e.y)
@@ -453,7 +602,7 @@ class RemoteSession internal constructor(
                     if (type != "mouseMoved") addProperty("clickCount", 1)
                 })
             }
-            "wheel" -> cmd("Input.dispatchMouseEvent", JsonObject().apply {
+            "wheel" -> cmdAsync("Input.dispatchMouseEvent", JsonObject().apply {
                 addProperty("type", "mouseWheel")
                 addProperty("x", e.x)
                 addProperty("y", e.y)
@@ -461,11 +610,11 @@ class RemoteSession internal constructor(
                 addProperty("deltaY", e.dy)
             })
             // 输入法选好的文字整段输入
-            "text" -> if (e.text.isNotEmpty()) cmd("Input.insertText", JsonObject().apply { addProperty("text", e.text.take(2000)) })
+            "text" -> if (e.text.isNotEmpty()) cmdAsync("Input.insertText", JsonObject().apply { addProperty("text", e.text.take(2000)) })
             // 回车、退格、方向键等
             "key" -> {
                 for (type in listOf("rawKeyDown", "keyUp")) {
-                    cmd("Input.dispatchKeyEvent", JsonObject().apply {
+                    cmdAsync("Input.dispatchKeyEvent", JsonObject().apply {
                         addProperty("type", type)
                         addProperty("key", e.key)
                         addProperty("code", e.code)
@@ -473,20 +622,24 @@ class RemoteSession internal constructor(
                         addProperty("nativeVirtualKeyCode", e.keyCode)
                     })
                     if (type == "rawKeyDown" && e.key == "Enter") {
-                        cmd("Input.dispatchKeyEvent", JsonObject().apply { addProperty("type", "char"); addProperty("text", "\r") })
+                        cmdAsync("Input.dispatchKeyEvent", JsonObject().apply { addProperty("type", "char"); addProperty("text", "\r") })
                     }
                 }
             }
-            "back" -> cmd("Runtime.evaluate", JsonObject().apply { addProperty("expression", "history.back()") })
-            "forward" -> cmd("Runtime.evaluate", JsonObject().apply { addProperty("expression", "history.forward()") })
-            "reload" -> cmd("Page.reload")
+            "back" -> cmdAsync("Runtime.evaluate", JsonObject().apply { addProperty("expression", "history.back()") })
+            "forward" -> cmdAsync("Runtime.evaluate", JsonObject().apply { addProperty("expression", "history.forward()") })
+            "reload" -> cmdAsync("Page.reload")
+            // 手动切换手机版 / 电脑版（之后不再自动切换）
+            "viewMode" -> {
+                modeLocked = true
+                setDesktop(e.action == "desktop")
+            }
             "resize" -> if (e.width > 0 && e.height > 0) {
                 val v = e.width.coerceIn(280, 1600) to e.height.coerceIn(280, 1600)
-                val s = if (e.dpr > 0) e.dpr.coerceIn(1.0, 3.0) else scale
-                if (v != viewport || s != scale) {
+                if (v != viewport) {
                     viewport = v
-                    scale = s
                     applyViewport()
+                    // 画面尺寸跟着视口变
                     startScreencast()
                 }
             }
@@ -525,7 +678,6 @@ class RemoteSession internal constructor(
     fun close() {
         if (!closed.compareAndSet(false, true)) return
         conn.removeListener(sessionId, listener)
-        events.close()
         closedSignal.complete(Unit)
         scope.launch {
             runCatching { conn.send("Target.closeTarget", JsonObject().apply { addProperty("targetId", targetId) }) }

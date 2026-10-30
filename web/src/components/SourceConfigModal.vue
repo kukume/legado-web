@@ -280,6 +280,31 @@ async function loadCookie() {
 }
 
 
+const webLogging = ref(false)
+
+/** 在远程浏览器中打开登录页，完成后刷新已保存的 Cookie */
+async function webLogin() {
+  if (!props.sourceId) return
+  webLogging.value = true
+  try {
+    const before = cookieInfo.value?.cookie || ''
+    const r = await sourceApi.webLogin(props.sourceId)
+    await effects.apply(r)
+    if (!r.ok && r.message) message.error(r.message)
+    await loadCookie()
+    // 告诉用户结果（有的书源不靠 Cookie 登录，如在请求头里带令牌）
+    if (r.ok) {
+      const after = cookieInfo.value?.cookie || ''
+      if (after && after !== before) message.success(t('已保存 {0} 的 Cookie', [cookieInfo.value?.domain || '']))
+      else if (!after) message.warning(t('登录页没有写入 Cookie'))
+    }
+  } catch (e: any) {
+    message.error(e.message)
+  } finally {
+    webLogging.value = false
+  }
+}
+
 async function saveCookie() {
   if (props.sourceId == null) return
   if (!cookieText.value.trim()) return message.warning(t('请先粘贴 Cookie'))
@@ -327,29 +352,42 @@ async function saveVariable() {
             <n-alert v-if="config.renderError" type="error" :bordered="false" style="margin-bottom: 12px">
               {{ t('登录界面脚本出错：{0}', [config.renderError]) }}
             </n-alert>
-            <!-- loginUrl 为网址：没有登录按钮，只能在网页中登录，由用户粘贴 Cookie -->
+            <!-- loginUrl 为网址：没有登录按钮，只能在网页中登录。
+                 远程浏览器登录后 Cookie 由服务器取回；新标签页登录读不到 Cookie，由用户粘贴 -->
             <div v-if="config.loginUrl && !config.loginUi.length" class="web-login">
               <p class="web-login-tip">
-                {{ t('此书源需要在网页中登录。网页版读不到你浏览器里的 Cookie，请在新标签页登录后，把该网站的 Cookie 粘贴到下方。') }}
+                <template v-if="config.remoteBrowser">{{ t('此书源需要在网页中登录。在远程浏览器中登录，完成后 Cookie 自动保存；在新标签页登录的话，网页版读不到你浏览器里的 Cookie，请把该网站的 Cookie 粘贴到下方。') }}</template>
+                <template v-else>{{ t('此书源需要在网页中登录。网页版读不到你浏览器里的 Cookie，请在新标签页登录后，把该网站的 Cookie 粘贴到下方。') }}</template>
               </p>
-              <div class="saved-row">
-                <n-button type="primary" size="small" tag="a" :href="safeHref(config.loginUrl)" target="_blank" rel="noopener">{{ t('在新标签页打开登录页') }}</n-button>
-                <!-- Cookie 很长时省略（不撑出弹窗），完整内容悬停查看 -->
-                <span class="muted small-note saved" :title="cookieInfo?.cookie || ''">
-                  {{ t('已保存：') }}<span class="mono">{{ cookieInfo?.cookie || t('无') }}</span>
-                </span>
+              <div class="login-actions">
+                <n-button v-if="config.remoteBrowser" type="primary" size="small" :loading="webLogging" @click="webLogin">{{ t('在远程浏览器中登录') }}</n-button>
+                <n-button
+                  :type="config.remoteBrowser ? 'default' : 'primary'"
+                  size="small"
+                  tag="a"
+                  :href="safeHref(config.loginUrl)"
+                  target="_blank"
+                  rel="noopener"
+                >{{ t('在新标签页登录') }}</n-button>
               </div>
-              <n-input
-                v-model:value="cookieText"
-                type="textarea"
-                :autosize="{ minRows: 2, maxRows: 6 }"
-                :placeholder="t('{0} 的 Cookie，如 sessionid=xxx; uid=yyy', [cookieInfo?.domain || t('该网站')])"
-                class="mono"
-              />
-              <cookie-help :site="cookieInfo?.domain" />
-              <n-space justify="end" style="margin-top: 8px">
-                <n-button size="small" type="primary" :loading="cookieSaving" @click="saveCookie">{{ t('保存 Cookie') }}</n-button>
-              </n-space>
+              <!-- Cookie 很长时省略（不撑出弹窗），完整内容悬停查看 -->
+              <div class="muted small-note saved" :title="cookieInfo?.cookie || ''">
+                {{ t('已保存：') }}<span class="mono">{{ cookieInfo?.cookie || t('无') }}</span>
+              </div>
+              <!-- 粘贴 Cookie（新标签页登录后，或已有 Cookie 时直接填写） -->
+              <div class="cookie-form">
+                <n-input
+                  v-model:value="cookieText"
+                  type="textarea"
+                  :autosize="{ minRows: 2, maxRows: 6 }"
+                  :placeholder="t('{0} 的 Cookie，如 sessionid=xxx; uid=yyy', [cookieInfo?.domain || t('该网站')])"
+                  class="mono"
+                />
+                <cookie-help :site="cookieInfo?.domain" />
+                <n-space justify="end" style="margin-top: 8px">
+                  <n-button size="small" type="primary" :loading="cookieSaving" @click="saveCookie">{{ t('保存 Cookie') }}</n-button>
+                </n-space>
+              </div>
             </div>
             <div class="rows">
               <template v-for="row in config.loginUi" :key="row.name">
@@ -543,19 +581,19 @@ async function saveVariable() {
 .links a {
   color: var(--app-accent);
 }
-.saved-row {
+.login-actions {
   display: flex;
-  align-items: center;
   flex-wrap: wrap;
-  gap: 6px 10px;
-  margin-bottom: 8px;
+  gap: 8px;
 }
 
-.saved-row .saved {
-  flex: 1 1 200px;
-  min-width: 0;
+.web-login .saved {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.cookie-form {
+  margin-top: 10px;
 }
 </style>

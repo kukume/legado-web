@@ -24,6 +24,10 @@ services:
       # LEGADO_DB_USER: legado
       # LEGADO_DB_PASSWORD: legado
       TZ: Asia/Shanghai
+      # 服务以普通用户运行（不是 root），启动时会把 ./data 里的文件改成这个用户。
+      # 设成宿主机上自己账号的 uid / gid（执行 id 查看），./data 里的文件就属于你自己，默认 1000
+      PUID: 1000
+      PGID: 1000
     restart: unless-stopped
     # depends_on: [postgres]
     networks:

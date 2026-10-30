@@ -25,8 +25,15 @@ FROM eclipse-temurin:21-jre
 # 在后台“系统设置”中填写它的调试地址（见 docker-compose.yml 中的 browser 服务）
 WORKDIR /app
 COPY --from=server /src/server/build/libs/legado-web.jar /app/legado-web.jar
+# 启动脚本：以 root 启动时修正数据目录的所有者，再切换成普通用户（PUID / PGID，默认 1000）运行服务。
+# 去掉可能混入的 Windows 换行符（在 Windows 上检出时），否则脚本无法执行
+COPY docker/entrypoint.sh /app/entrypoint.sh
+RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod 755 /app/entrypoint.sh \
+    && mkdir -p /data && chown 1000:1000 /data
 ENV LEGADO_DATA_DIR=/data \
-    PORT=8080
+    PORT=8080 \
+    PUID=1000 \
+    PGID=1000
 # 检查更新用：构建时间（GitHub Actions 传入的 SOURCE_DATE_EPOCH，与镜像的 created 相同）和镜像名。
 # 本地构建不传时为空，服务显示为开发版，不检查更新
 ARG SOURCE_DATE_EPOCH
@@ -35,4 +42,5 @@ ENV LEGADO_BUILD_TIME=${SOURCE_DATE_EPOCH} \
     LEGADO_IMAGE=${LEGADO_IMAGE}
 VOLUME /data
 EXPOSE 8080
-ENTRYPOINT ["java", "-Xmx512m", "-jar", "/app/legado-web.jar"]
+ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["java", "-Xmx512m", "-jar", "/app/legado-web.jar"]

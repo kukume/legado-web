@@ -49,6 +49,10 @@ import io.legado.web.service.BrowserBridge
 import io.legado.web.routes.browserRoutes
 import io.legado.app.help.source.SourceVerificationHelp
 import io.ktor.server.sse.SSE
+import io.ktor.server.websocket.WebSockets
+import io.ktor.server.websocket.pingPeriod
+import io.ktor.server.websocket.timeout
+import kotlin.time.Duration.Companion.seconds
 import io.legado.web.service.ApiKeyService
 import io.legado.web.routes.sourceRoutes
 import io.legado.web.service.ProxyService
@@ -149,6 +153,7 @@ fun Application.module() {
     applyBrowser()
     settingService.onChange { keys -> if (SettingService.BROWSER_CDP in keys) applyBrowser() }
     browserBridge.remoteEnabled = { settingService.getBool(SettingService.REMOTE_BROWSER_ENABLED) }
+    configService.remoteBrowser = { browserBridge.remoteAvailable() }
     val proxyService = ProxyService(sourceService, shelfService)
     val apiKeyService = ApiKeyService(userService)
 
@@ -215,6 +220,12 @@ fun Application.module() {
         }
     }
     install(SSE)
+    // 远程浏览器的画面和操作走 WebSocket；定时 ping 防止反代或网络因空闲断开连接
+    install(WebSockets) {
+        pingPeriod = 25.seconds
+        timeout = 60.seconds
+        maxFrameSize = 4L * 1024 * 1024
+    }
     // 前端静态文件的缓存：/assets/ 下的文件名带内容哈希，长期缓存；页面、Service Worker、清单每次都向服务器确认，
     // 发布新版本后浏览器能立刻发现（否则浏览器可能按修改时间自行缓存，很久才提示更新）
     intercept(io.ktor.server.application.ApplicationCallPipeline.Plugins) {

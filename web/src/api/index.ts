@@ -114,6 +114,8 @@ export const sourceApi = {
   loginConfig: (id: number) => http.get<LoginConfig>(`/api/sources/${id}/login`),
   login: (id: number, info: Record<string, string>) =>
     http.post<ActionResult>(`/api/sources/${id}/login`, { info }),
+  /** 登录地址是网址：在远程浏览器中打开登录页，等用户操作完成后返回 */
+  webLogin: (id: number) => http.post<ActionResult>(`/api/sources/${id}/web-login`, {}),
   /** 只保存登录界面中填写的内容 */
   saveLoginInfo: (id: number, info: Record<string, string>) => http.post(`/api/sources/${id}/login-info`, { info }),
   action: (id: number, action: string, info: Record<string, string>, isLongClick = false) =>

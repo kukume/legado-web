@@ -34,8 +34,10 @@ docker compose -f docker-compose.ghcr.yml pull && docker compose -f docker-compo
 不用 Compose 时：
 
 ```bash
-docker run -d --name legado-web -p 8955:8080 -v ./data:/data -e TZ=Asia/Shanghai ghcr.io/kukume/legado-web:latest
+docker run -d --name legado-web -p 8955:8080 -v ./data:/data -e TZ=Asia/Shanghai -e PUID=1000 -e PGID=1000 ghcr.io/kukume/legado-web:latest
 ```
+
+服务在容器里以普通用户运行（不是 root）：容器启动时自动把数据目录的所有者改成 `PUID` / `PGID`（默认 1000），再切换成这个用户运行，以前用 root 运行时留下的数据也会自动改好，不用手动 `chown`。把它们设成宿主机上自己账号的 uid / gid（执行 `id` 查看），`./data` 里的文件就属于你自己。在 Compose 里写了 `user:` 时容器不以 root 启动，不会修改目录权限，需要自己保证数据目录可写。
 
 ### 本地开发
 

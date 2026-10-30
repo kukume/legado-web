@@ -225,6 +225,8 @@ export interface LoginConfig {
   variable: string
   variableComment: string | null
   renderError?: string | null
+  /** 远程浏览器可用：登录网址可以选择在远程浏览器中打开 */
+  remoteBrowser?: boolean
 }
 
 export interface LoginV2Render {

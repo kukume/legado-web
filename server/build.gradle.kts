@@ -31,6 +31,7 @@ dependencies {
     implementation("io.ktor:ktor-server-cors:$ktorVersion")
     implementation("io.ktor:ktor-server-compression:$ktorVersion")
     implementation("io.ktor:ktor-server-sse:$ktorVersion")
+    implementation("io.ktor:ktor-server-websockets:$ktorVersion")
     implementation("io.ktor:ktor-server-config-yaml:$ktorVersion")
     // 开放接口文档（Swagger UI 静态资源，离线可用）
     implementation("org.webjars:swagger-ui:5.33.1")
