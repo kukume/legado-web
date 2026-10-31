@@ -23,6 +23,10 @@ class EngineContext(
     /** 脚本调用 startBrowser / openUrl 请求打开的网页，由前端在新标签页打开 */
     val openUrls: MutableList<String> = java.util.Collections.synchronizedList(mutableListOf())
 
+    /** 脚本不等待结果地打开了网页（远程浏览器 / 底部弹窗），没有放进 [openUrls] */
+    @Volatile
+    var openedBrowser: Boolean = false
+
     /** 脚本请求的刷新动作（refreshBookInfo / refreshBookToc / refreshContent） */
     val events: MutableList<String> = java.util.Collections.synchronizedList(mutableListOf())
 

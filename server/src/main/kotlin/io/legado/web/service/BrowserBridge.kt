@@ -17,6 +17,7 @@ import io.legado.web.auth.NotFoundException
 import io.legado.web.webview.RemoteBrowserManager
 import io.legado.web.webview.RemoteSession
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.Request
@@ -332,7 +333,8 @@ class BrowserBridge : SourceVerificationHelp.Handler {
             val req = analyzeUrl.browserRequest()
             RemoteBrowserManager.OpenRequest(
                 method = req.method, url = req.url, body = req.body, contentType = req.contentType,
-                headers = analyzeUrl.headerMap.toMap(), cookie = CookieStore.getCookie(req.url),
+                headers = analyzeUrl.headerMap.toMap(),
+                cookie = BrowserCookies.forPage(EngineContext.currentUserId, req.url, CookieStore.getCookie(req.url)),
                 sourceUrl = source.getKey(),
             )
         } catch (e: Exception) {
@@ -460,13 +462,45 @@ class BrowserBridge : SourceVerificationHelp.Handler {
             pending.remove(token)
             sessions.remove(token)
             remoteSessions.remove(token)?.let { e ->
-                e.session?.close()
+                // 关闭前（完成或取消都一样）把网页的 Cookie 存进远程浏览器自己的 Cookie，同 App 的内置浏览器
+                e.session?.let { s ->
+                    runCatching {
+                        kotlinx.coroutines.runBlocking { kotlinx.coroutines.withTimeout(5_000) { s.cookies() } }
+                            .forEach { (u, c) -> BrowserCookies.save(userId, u, c) }
+                    }
+                    s.close()
+                }
                 if (e.acquired) remoteBrowser?.release()
             }
             ctx.userWaitMs.addAndGet(System.currentTimeMillis() - started)
             ctx.waitingForUser.decrementAndGet()
             broadcast(userId, BrowserEvent("close", token))
         }
+    }
+
+    /** 不等待结果地打开网页时，在后台等待用户操作 */
+    private val asyncScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
+
+    /**
+     * java.startBrowser（不等待结果）：远程浏览器可用时和 startBrowserAwait 一样打开（可以选远程浏览器或新标签页），
+     * 只是脚本不等待；用户完成后网页的 Cookie 照常保存，书源随后的请求就能用上（如发现页的“登录番茄”）
+     */
+    override fun openAsync(source: BaseSource, url: String, title: String): Boolean {
+        val cur = EngineContext.current ?: return false
+        val userId = cur.userId
+        if (userId == 0L || !remoteAvailable() || !hasListener(userId)) return false
+        val ctx = EngineContext(userId).apply {
+            clientId = cur.clientId
+            allowPageFallback = true
+        }
+        asyncScope.launch(ctx) {
+            try {
+                getVerificationResult(source, url, title, useBrowser = true, html = null)
+            } catch (e: Exception) {
+                logger.warn("打开网页失败: {}", e.message)
+            }
+        }
+        return true
     }
 
     override fun showBrowser(source: BaseSource, url: String, html: String?, config: String?): Boolean {

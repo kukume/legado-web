@@ -148,8 +148,8 @@ class SearchService(
                 WebBook.exploreBookAwait(stored.source, url, page)
             }
         } catch (e: Exception) {
-            // 只是打开网页的分类，请求失败属于正常情况
-            if (ctx.openUrls.isEmpty() && ctx.messages.isEmpty()) throw e
+            // 只是打开网页的分类（如 {{java.startBrowser(...)}}），之后按地址请求失败属于正常情况
+            if (ctx.openUrls.isEmpty() && ctx.messages.isEmpty() && !ctx.openedBrowser) throw e
             emptyList()
         }
         return ExploreResult(

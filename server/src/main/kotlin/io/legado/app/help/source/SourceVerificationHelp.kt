@@ -41,6 +41,12 @@ object SourceVerificationHelp {
          * @return false 表示当前没有可以显示的页面，按默认方式处理
          */
         fun showBrowser(source: BaseSource, url: String, html: String?, config: String?): Boolean = false
+
+        /**
+         * 不等待结果地打开网址（java.startBrowser）：在后台打开浏览器让用户操作，关闭时保存网页的 Cookie（同 App 的内置浏览器）。
+         * @return false 表示没有可用的浏览器，按默认方式处理（交给前端在新标签页打开）
+         */
+        fun openAsync(source: BaseSource, url: String, title: String): Boolean = false
     }
 
     @Volatile
@@ -87,15 +93,16 @@ object SourceVerificationHelp {
     }
 
     /**
-     * 不等待结果地打开网页：在线网址交给前端在新标签页打开；
+     * 不等待结果地打开网页：在线网址在后台打开浏览器（没有远程浏览器时交给前端在新标签页打开）；
      * 书源生成的网页（data:、直接给出的 HTML，如使用教程）在前端的底部弹窗里显示
      */
     private fun requestOpen(source: BaseSource, url: String, title: String, html: String?) {
         if (url.startsWith("http", true) && html.isNullOrBlank()) {
-            EngineContext.current?.openUrls?.add(url)
+            if (handler?.openAsync(source, url, title) == true) EngineContext.current?.openedBrowser = true
+            else EngineContext.current?.openUrls?.add(url)
         } else {
             val config = GSON.toJson(mapOf("title" to title))
-            handler?.showBrowser(source, url, html, config)
+            if (handler?.showBrowser(source, url, html, config) == true) EngineContext.current?.openedBrowser = true
         }
         Debug.log(source.getKey(), "⇒请求打开网页（$title）: ${url.take(200)}")
     }

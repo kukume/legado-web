@@ -652,6 +652,11 @@ class RemoteSession internal constructor(
     suspend fun result(): Result {
         val url = evaluate("location.href") ?: currentUrl
         val html = evaluate("'<!DOCTYPE html>' + document.documentElement.outerHTML").orEmpty()
+        return Result(url, html, cookies(url))
+    }
+
+    /** 当前网页和打开的网页上的 Cookie（含 HttpOnly），按网站整理成 a=1; b=2 */
+    suspend fun cookies(url: String = currentUrl): Map<String, String> {
         val urls = JsonArray().apply { listOf(url, req.url).distinct().forEach { add(it.substringBefore(",{")) } }
         val cookies = runCatching { cmd("Network.getCookies", JsonObject().apply { add("urls", urls) }) }.getOrNull()
             ?.getAsJsonArray("cookies")
@@ -663,7 +668,7 @@ class RemoteSession internal constructor(
             byHost.getOrPut("${if (secure) "https" else "http"}://$domain/") { mutableListOf() }
                 .add("${o.get("name").asString}=${o.get("value").asString}")
         }
-        return Result(url, html, byHost.mapValues { it.value.joinToString("; ") })
+        return byHost.mapValues { it.value.joinToString("; ") }
     }
 
     private suspend fun evaluate(js: String): String? {
