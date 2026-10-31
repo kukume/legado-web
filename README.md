@@ -6,7 +6,7 @@
 - **前端**：Vue 3 + Vite + TypeScript + Pinia + Naive UI
 - **书源引擎**：移植自 LegadoTeam/legado（引擎修复同步到`531f9fbf`），兼容阅读 3.0 书源 JSON 与纯 JS 书源
 - **本地书籍**：上传 EPUB、TXT、MOBI、AZW3、AZW、UMD、PDF
-- **规则**：替换规则、字典规则（阅读时选中文字 → 字典）、TXT 目录规则（上传 TXT 时自动分章，也可为单本书指定规则）
+- **规则**：替换规则、字典规则、TXT 目录规则
 - **备份与恢复**：支持与阅读 App 的备份 zip 互通，可恢复 App 备份中的书架（含进度、分组、书签）、书源、替换规则、字典规则、TXT 目录规则、书源订阅，导出的 zip 也能在 App 中恢复；支持 WebDAV。
 
 > 本项目不内置任何书源，只提供通用的规则解析工具。请遵守所在地法律，仅用于合法获取的内容。
@@ -36,8 +36,6 @@ docker compose -f docker-compose.ghcr.yml pull && docker compose -f docker-compo
 ```bash
 docker run -d --name legado-web -p 8955:8080 -v ./data:/data -e TZ=Asia/Shanghai -e PUID=1000 -e PGID=1000 ghcr.io/kukume/legado-web:latest
 ```
-
-服务在容器里以普通用户运行（不是 root）：容器启动时自动把数据目录的所有者改成 `PUID` / `PGID`（默认 1000），再切换成这个用户运行，以前用 root 运行时留下的数据也会自动改好，不用手动 `chown`。把它们设成宿主机上自己账号的 uid / gid（执行 `id` 查看），`./data` 里的文件就属于你自己。在 Compose 里写了 `user:` 时容器不以 root 启动，不会修改目录权限，需要自己保证数据目录可写。
 
 ### 本地开发
 
@@ -93,20 +91,6 @@ java -jar server/build/libs/legado-web.jar
 - rar / 7z 解压不支持（zip 支持）；RSS 源暂未实现；在线朗读引擎的登录界面（loginUi）暂不支持；PDF 只显示页面图像，不能选中文字、朗读
 - 书源直接调用 Android 类（`Packages.android.*`）的写法无法运行（常用的 `android.util.Base64` 已提供兼容实现）
 
-## 项目结构
-
-```
-server/
-  src/main/kotlin/io/legado/app/   # 从阅读移植的书源引擎（保留原包名）
-    model/analyzeRule/             # 规则解析
-    model/webBook/                 # 搜索 / 详情 / 目录 / 正文
-    help/JsExtensions.kt           # js 中的 java 对象
-    help/engine/                   # 服务端新增：用户隔离上下文、存储接口、无头浏览器接口
-  src/main/kotlin/com/script/      # Rhino 脚本引擎封装
-  src/main/kotlin/io/legado/web/   # Web 应用：路由、服务、数据库、鉴权
-  src/test/kotlin/                 # 引擎集成测试（本地模拟站点）
-web/                               # Vue 3 前端
-```
 
 ## 许可证
 
