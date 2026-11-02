@@ -28,11 +28,13 @@ import io.legado.web.auth.BadRequestException
 import io.legado.web.auth.ForbiddenException
 import io.legado.web.auth.JwtService
 import io.legado.web.auth.NotFoundException
+import io.legado.web.auth.TooManyRequestsException
 import io.legado.web.auth.UnauthorizedException
 import io.legado.web.auth.configureSecurity
 import io.legado.web.config.AppSettings
 import io.legado.web.db.DatabaseFactory
 import io.legado.web.db.DbEngineStore
+import io.legado.web.routes.longCallRoutes
 import io.legado.web.routes.mediaRoutes
 import io.legado.web.routes.bookmarkRoutes
 import io.legado.web.routes.readingStatsRoutes
@@ -92,10 +94,16 @@ fun Application.module() {
     Engine.store = engineStore
     Engine.cacheDir = File(appSettings.dataDir, "cache").apply { mkdirs() }
     Engine.secret = appSettings.engineSecret
-    Engine.threadCount = appSettings.threadCount
-    appSettings.userAgent?.let { Engine.userAgent = it }
     // ---------- 服务 ----------
     val settingService = SettingService()
+    // 书源请求的并发数、User-Agent：系统设置里修改，保存后立即生效
+    val defaultUserAgent = Engine.userAgent
+    fun applyEngineSettings() {
+        Engine.threadCount = settingService.getInt(SettingService.THREAD_COUNT).coerceAtLeast(1)
+        Engine.userAgent = settingService.get(SettingService.USER_AGENT).trim().ifEmpty { defaultUserAgent }
+    }
+    applyEngineSettings()
+    settingService.onChange { keys -> if (SettingService.THREAD_COUNT in keys || SettingService.USER_AGENT in keys) applyEngineSettings() }
     // 书源请求的内网防护：始终开启，只能在系统设置里放行指定的内网地址（设置有缓存，每次连接读取的开销很小）
     io.legado.web.security.NetworkGuard.configure { settingService.get(SettingService.PRIVATE_NETWORK_ALLOWLIST) }
     val captchaService = io.legado.web.service.CaptchaService(settingService, appSettings.captchaDisabled)
@@ -106,7 +114,7 @@ fun Application.module() {
     val bookmarkService = BookmarkService()
     val readingStatsService = ReadingStatsService()
     val shelfService = ShelfService(sourceService, replaceService, appSettings)
-    val searchService = SearchService(sourceService, appSettings)
+    val searchService = SearchService(sourceService, settingService)
     val configService = SourceConfigService(sourceService)
     val subscriptionService = SubscriptionService(sourceService)
     // 本地书籍（EPUB / TXT）
@@ -200,6 +208,7 @@ fun Application.module() {
                 is ForbiddenException -> HttpStatusCode.Forbidden to cause.message
                 is NotFoundException -> HttpStatusCode.NotFound to cause.message
                 is BadRequestException -> HttpStatusCode.BadRequest to cause.message
+                is TooManyRequestsException -> HttpStatusCode.TooManyRequests to cause.message
                 is KtorBadRequest -> HttpStatusCode.BadRequest to (cause.cause?.message ?: cause.message)
                 is JsonSyntaxException -> HttpStatusCode.BadRequest to "JSON 格式错误"
                 is TimeoutCancellationException -> HttpStatusCode.GatewayTimeout to "书源响应超时"
@@ -246,7 +255,8 @@ fun Application.module() {
 
     routing {
         authRoutes(userService, jwtService, settingService, captchaService, updateService)
-        sourceRoutes(sourceService, configService, searchService, subscriptionService, io.legado.web.service.SourceCheckService(sourceService, appSettings))
+        longCallRoutes()
+        sourceRoutes(sourceService, configService, searchService, subscriptionService, io.legado.web.service.SourceCheckService(sourceService, settingService))
         shelfRoutes(shelfService, replaceService, proxyService, configService, reviewService, localBookService)
         openApiRoutes(apiKeyService, shelfService)
         backupRoutes(backupService, webDavService)

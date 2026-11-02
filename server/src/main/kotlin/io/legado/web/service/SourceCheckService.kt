@@ -2,7 +2,6 @@ package io.legado.web.service
 
 import io.legado.app.model.webBook.WebBook
 import io.legado.web.auth.UserPrincipal
-import io.legado.web.config.AppSettings
 import io.legado.web.engine.runEngine
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
@@ -18,7 +17,7 @@ import kotlinx.coroutines.sync.withPermit
  */
 class SourceCheckService(
     private val sourceService: SourceService,
-    private val settings: AppSettings,
+    private val settings: SettingService,
 ) {
     data class CheckResult(
         val id: Long,
@@ -55,7 +54,7 @@ class SourceCheckService(
         val targets = ids.filter { it in visible }.distinct()
         val total = targets.size
         if (total == 0) return@coroutineScope
-        val semaphore = Semaphore(settings.searchConcurrency.coerceIn(1, 8))
+        val semaphore = Semaphore(settings.getInt(SettingService.SEARCH_CONCURRENCY).coerceIn(1, 8))
         val results = Channel<CheckResult>(Channel.UNLIMITED)
         val job = launch {
             targets.forEach { id ->

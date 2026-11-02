@@ -20,12 +20,6 @@ data class AppSettings(
     val engineSecret: String,
     val jwtIssuer: String,
     val jwtExpireDays: Int,
-    val userAgent: String?,
-    val threadCount: Int,
-    /** 多书源搜索时的并发数 */
-    val searchConcurrency: Int,
-    /** 单个书源搜索超时（毫秒） */
-    val searchTimeout: Long,
     val corsHosts: List<String>,
     /** 强制关闭登录、注册的人机验证（Cap 服务不可用、管理员登录不了时用） */
     val captchaDisabled: Boolean,
@@ -68,10 +62,6 @@ data class AppSettings(
                 engineSecret = engineSecret,
                 jwtIssuer = str("legado.jwt.issuer") ?: "legado-web",
                 jwtExpireDays = str("legado.jwt.expireDays")?.toIntOrNull() ?: 30,
-                userAgent = str("legado.engine.userAgent"),
-                threadCount = str("legado.engine.threadCount")?.toIntOrNull() ?: 8,
-                searchConcurrency = str("legado.engine.searchConcurrency")?.toIntOrNull() ?: 16,
-                searchTimeout = str("legado.engine.searchTimeout")?.toLongOrNull() ?: 30000L,
                 corsHosts = str("legado.cors")?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }
                     ?: emptyList(),
                 captchaDisabled = str("legado.captcha.disabled")?.lowercase() in setOf("true", "1", "yes"),

@@ -171,9 +171,6 @@ const columns = computed<DataTableColumns<TxtTocRule>>(() => isMobile.value ? mo
 <template>
   <div>
     <div class="rule-toolbar">
-      <p class="muted rule-desc">
-        {{ t('上传 TXT 时按序号依次尝试启用的规则，自动选出最合适的分章方式（与阅读 App 相同）。识别得不理想时，可以在书籍详情页为这本书单独指定规则。') }}
-      </p>
       <n-checkbox v-if="isMobile" class="select-all" :checked="selectAll.all.value" :indeterminate="selectAll.some.value" @update:checked="selectAll.toggleAll">{{ t('全选') }}</n-checkbox>
       <n-button size="small" :disabled="!checked.length" type="error" ghost @click="remove(checked)">{{ t('删除选中') }}</n-button>
       <n-button size="small" @click="exportRules">{{ t('导出') }}</n-button>

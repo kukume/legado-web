@@ -128,9 +128,6 @@ const columns = computed(() =>
 <template>
   <div>
     <div class="rule-toolbar">
-      <p class="muted rule-desc">
-        {{ t('用于净化正文（去广告、修正错字等），与阅读 App 的替换规则格式兼容。范围可填书名或书源地址，多个用逗号分隔。') }}
-      </p>
       <n-checkbox v-if="isMobile" class="select-all" :checked="selectAll.all.value" :indeterminate="selectAll.some.value" @update:checked="selectAll.toggleAll">{{ t('全选') }}</n-checkbox>
       <n-button size="small" :disabled="!checked.length" type="error" ghost @click="remove(checked)">{{ t('删除选中') }}</n-button>
       <n-button size="small" @click="exportRules">{{ t('导出') }}</n-button>

@@ -74,10 +74,6 @@ java -jar server/build/libs/legado-web.jar
 | `LEGADO_DB_USER` / `LEGADO_DB_PASSWORD` | - | PostgreSQL 账号 |
 | `LEGADO_JWT_SECRET` | 自动生成 | JWT 密钥（更换后所有用户需重新登录） |
 | `LEGADO_ENGINE_SECRET` | 自动生成 | 书源登录信息的加密密钥，保存在 `dataDir/.engine-secret`，迁移数据时请一并保留 |
-| `LEGADO_SEARCH_CONCURRENCY` | 16 | 多书源搜索并发数 |
-| `LEGADO_SEARCH_TIMEOUT` | 30000 | 单书源搜索超时（毫秒） |
-| `LEGADO_THREAD_COUNT` | 8 | 目录/正文多页并发数 |
-| `LEGADO_USER_AGENT` | Chrome UA | 默认 User-Agent |
 | `LEGADO_CORS` | - | 允许跨域的前端地址（前后端分开部署时使用） |
 | `LEGADO_CAPTCHA_DISABLED` | false | 设为 `true` 时忽略“系统设置”里的人机验证（Cap 服务不可用、管理员登录不了时临时使用） |
 

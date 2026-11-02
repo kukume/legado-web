@@ -223,17 +223,14 @@ function removeFont(f: UserFont) {
           <div class="set-row">
             <label>{{ t('替换净化') }}</label>
             <n-switch :value="processing.useReplaceRule" @update:value="(v: boolean) => $emit('process', 'useReplaceRule', v)" />
-            <span class="muted-r small">{{ t('本书使用替换规则（去广告、改错字等），关闭后显示原文') }}</span>
           </div>
           <div class="set-row">
             <label>{{ t('删除重复标题') }}</label>
             <n-switch :value="processing.removeSameTitle" @update:value="(v: boolean) => $emit('process', 'removeSameTitle', v)" />
-            <span class="muted-r small">{{ t('本书正文开头与章节名相同的一行不显示') }}</span>
           </div>
           <div class="set-row">
             <label>{{ t('重新分段') }}</label>
             <n-switch :value="processing.reSegment" @update:value="(v: boolean) => $emit('process', 'reSegment', v)" />
-            <span class="muted-r small">{{ t('本书段落错乱（一句一行或整章一段）时，按标点和对话重新分段') }}</span>
           </div>
         </template>
         <div class="set-row">

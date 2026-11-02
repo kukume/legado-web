@@ -18,6 +18,9 @@ const newName = ref('')
 const createdKey = ref<string | null>(null)
 
 const docsUrl = `${location.origin}/openapi/docs`
+
+/** “生成 API Key”按钮在卡片标题栏（我的页面） */
+defineExpose({ openCreate: () => (showCreate.value = true) })
 /** IDE 插件（VS Code、JetBrains），通过开放接口读书 */
 const PLUGINS_URL = 'https://github.com/kukume/legado-plugins'
 
@@ -79,13 +82,6 @@ const columns: DataTableColumns<ApiKeyInfo> = [
 
 <template>
   <div>
-    <div class="bar">
-      <span class="muted small">
-        {{ t('API Key 用于在其他程序中访问你的书架和正文，拥有与你的账号相同的阅读权限，请妥善保管。') }}
-      </span>
-      <div style="flex: 1" />
-      <n-button size="small" type="primary" @click="showCreate = true">{{ t('生成 API Key') }}</n-button>
-    </div>
 
     <n-data-table :columns="columns" :data="keys" :loading="loading" size="small" :scroll-x="560" />
 
@@ -119,13 +115,6 @@ const columns: DataTableColumns<ApiKeyInfo> = [
 </template>
 
 <style scoped>
-.bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-
 .small {
   font-size: 13px;
 }

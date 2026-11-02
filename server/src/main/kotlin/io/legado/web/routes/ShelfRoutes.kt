@@ -69,7 +69,8 @@ fun Route.shelfRoutes(
 
             /** 打开书籍（可选加入书架） */
             post("/open") {
-                call.respond(shelfService.open(call.user, call.receive<OpenBookRequest>()))
+                val req = call.receive<OpenBookRequest>()
+                call.respondLong { shelfService.open(call.user, req) }
             }
             /** 手动排序：请求体为按新顺序排列的书籍 id */
             put("/order") {
@@ -96,7 +97,7 @@ fun Route.shelfRoutes(
             }
             post("/{id}/refresh") {
                 val info = call.request.queryParameters["info"] == "true"
-                call.respond(shelfService.refreshToc(call.user, call.longParam("id"), info))
+                call.respondLong { shelfService.refreshToc(call.user, call.longParam("id"), info) }
             }
             // 本地 TXT 指定目录规则重新分章：tocUrl 为“规则 + 分隔符 + js 处理”（与 App 相同），空字符串表示自动选择
             post("/{id}/txt-toc") {
@@ -104,7 +105,7 @@ fun Route.shelfRoutes(
                 call.respond(shelfService.refreshToc(call.user, call.longParam("id"), txtTocUrl = req.tocUrl))
             }
             get("/{id}/chapters") {
-                call.respond(shelfService.chapters(call.user, call.longParam("id")))
+                call.respondLong { shelfService.chapters(call.user, call.longParam("id")) }
             }
             /** 书内全文搜索：?q=关键字 */
             get("/{id}/search") {
@@ -113,7 +114,7 @@ fun Route.shelfRoutes(
             }
             get("/{id}/content/{index}") {
                 val refresh = call.request.queryParameters["refresh"] == "true"
-                call.respond(shelfService.content(call.user, call.longParam("id"), call.intParam("index"), refresh))
+                call.respondLong { shelfService.content(call.user, call.longParam("id"), call.intParam("index"), refresh) }
             }
             // ---------- 本地书籍（EPUB / TXT） ----------
             get("/local/info") { call.respond(localBookService.info(call.user)) }
@@ -203,7 +204,7 @@ fun Route.shelfRoutes(
             post("/{id}/content/{index}/click") {
                 val src = call.receive<ImageClickRequest>().src
                 val (source, book, chapter) = shelfService.imageClickContext(call.user, call.longParam("id"), call.intParam("index"), src)
-                call.respond(configService.clickImage(call.user, source, book, chapter, src))
+                call.respondLong { configService.clickImage(call.user, source, book, chapter, src) }
             }
             put("/{id}/progress") {
                 val req = call.receive<ProgressRequest>()
@@ -222,7 +223,8 @@ fun Route.shelfRoutes(
                 call.respond(OkResponse())
             }
             post("/{id}/change-source") {
-                call.respond(shelfService.changeSource(call.user, call.longParam("id"), call.receive<OpenBookRequest>()))
+                val req = call.receive<OpenBookRequest>()
+                call.respondLong { shelfService.changeSource(call.user, call.longParam("id"), req) }
             }
         }
 

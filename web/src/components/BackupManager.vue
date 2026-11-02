@@ -14,6 +14,7 @@ import {
 import { useAuthStore } from '@/stores/auth'
 import { formatDate, formatTime } from '@/utils/media'
 import { t } from '@/i18n'
+import HelpTip from '@/components/HelpTip.vue'
 
 const message = useMessage()
 const dialog = useDialog()
@@ -183,9 +184,6 @@ const cloudColumns: DataTableColumns<WebDavFile> = [
 
 <template>
   <div>
-    <p class="muted small" style="margin-top: 0">
-      {{ t('备份文件与阅读 App 通用：App 中“我的 → 备份与恢复”生成的 zip 可以在这里恢复，这里导出的 zip 也可以在 App 中恢复。') }}
-    </p>
     <n-space :size="[16, 4]" style="margin-bottom: 10px">
       <n-checkbox v-for="l in labels" :key="l.key" v-model:checked="parts[l.key]">{{ l.label }}</n-checkbox>
     </n-space>
@@ -230,7 +228,7 @@ const cloudColumns: DataTableColumns<WebDavFile> = [
         <n-alert v-if="dav?.lastError" type="warning" :bordered="false" style="margin-bottom: 10px">
           {{ t('上次自动备份失败：{0}', [dav.lastError]) }}
         </n-alert>
-        <n-form label-placement="left" label-width="80" size="small" style="max-width: 520px">
+        <n-form label-placement="left" label-width="auto" size="small" style="max-width: 520px">
           <n-form-item :label="t('服务器地址')">
             <n-input v-model:value="davForm.url" placeholder="https://dav.jianguoyun.com/dav/" />
           </n-form-item>
@@ -251,23 +249,19 @@ const cloudColumns: DataTableColumns<WebDavFile> = [
           <n-form-item :label="t('设备名')">
             <n-input v-model:value="davForm.deviceName" :placeholder="t('可选，会加在备份文件名后，如 web')" />
           </n-form-item>
-          <n-form-item :label="t('自动备份')">
+          <n-form-item>
+            <template #label>{{ t('自动备份') }}<help-tip>{{ t('每天自动备份一次到 WebDAV') }}</help-tip></template>
             <n-switch :value="davForm.autoBackup" @update:value="toggleAuto" />
-            <span class="muted small" style="margin-left: 8px">{{ t('每天自动备份一次到 WebDAV') }}</span>
           </n-form-item>
           <n-form-item label=" ">
             <n-button type="primary" size="small" :loading="davSaving" @click="saveDav">{{ t('测试并保存') }}</n-button>
           </n-form-item>
         </n-form>
-        <p class="muted small" style="margin: 0">
-          {{ t('与 App 的 WebDAV 设置一致（地址、账号、目录都相同）时，两边的备份都在同一个文件夹里，可以互相恢复。') }}
-        </p>
       </n-collapse-item>
     </n-collapse>
 
-    <p class="muted small note">
-      {{ t('说明：本地书籍（手机上的 txt/epub）无法在网页版打开，恢复时会跳过；阅读进度精确到章节，章内位置为估算。 App 恢复时会用备份中的分组覆盖同编号的分组，书签、阅读记录、主题等网页版没有的内容不包含在导出中。') }}
-      <template v-if="!auth.isAdmin && !auth.me?.canAddSource">{{ t('当前账号没有添加书源的权限，恢复时会跳过书源和订阅。') }}</template>
+    <p v-if="!auth.isAdmin && !auth.me?.canAddSource" class="muted small note">
+      {{ t('当前账号没有添加书源的权限，恢复时会跳过书源和订阅。') }}
     </p>
 
     <n-modal v-model:show="showCloud" preset="card" :title="t('WebDAV 上的备份')" style="max-width: 640px">

@@ -4,8 +4,9 @@ import {
   NAlert, NButton, NDataTable, NIcon, NInput, NInputNumber, NModal, NRadioButton, NRadioGroup,
   NSpace, NSwitch, NTabs, NTabPane, useDialog, useMessage, type DataTableColumns,
 } from 'naive-ui'
-import { BookOutline, CloudDownloadOutline, GlobeOutline, HomeOutline, LockClosedOutline, PeopleOutline, ShieldCheckmarkOutline } from '@vicons/ionicons5'
+import { BookOutline, CloudDownloadOutline, GlobeOutline, HomeOutline, LockClosedOutline, PeopleOutline, ShieldCheckmarkOutline, SpeedometerOutline } from '@vicons/ionicons5'
 import InviteManager from '@/components/InviteManager.vue'
+import HelpTip from '@/components/HelpTip.vue'
 import { useIsMobile } from '@/composables/useIsMobile'
 import { mobileColumns } from '@/utils/mobileTable'
 import { adminApi } from '@/api'
@@ -271,7 +272,6 @@ async function saveSettings() {
               <div class="set-row">
                 <div class="set-text">
                   <div class="set-label">{{ t('站点名称') }}</div>
-                  <div class="set-desc">{{ t('显示在页面标题和登录页') }}</div>
                 </div>
                 <div class="set-control wide"><n-input v-model:value="settings.siteName" /></div>
               </div>
@@ -284,7 +284,6 @@ async function saveSettings() {
               <div class="set-row">
                 <div class="set-text">
                   <div class="set-label">{{ t('注册方式') }}</div>
-                  <div class="set-desc">{{ t('邀请码注册时，新用户需要填写管理员生成的邀请码') }}</div>
                 </div>
                 <div class="set-control">
                   <n-radio-group v-model:value="settings.registrationMode" size="small">
@@ -297,12 +296,15 @@ async function saveSettings() {
           </section>
 
           <section class="set-group">
-            <h3 class="set-group-title"><n-icon :component="ShieldCheckmarkOutline" />{{ t('登录验证') }}</h3>
+            <h3 class="set-group-title"><n-icon :component="ShieldCheckmarkOutline" />{{ t('登录安全') }}</h3>
             <div class="set-card">
               <div class="set-row">
                 <div class="set-text">
-                  <div class="set-label">{{ t('登录注册人机验证') }}</div>
-                  <div class="set-desc">{{ t('使用 Cap 验证码') }}</div>
+                  <div class="set-label">
+                    {{ t('登录注册人机验证') }}<help-tip>
+                      {{ t('使用') }} <a href="https://capjs.js.org/guide/standalone/" target="_blank" rel="noopener">Cap Standalone</a>
+                    </help-tip>
+                  </div>
                 </div>
                 <div class="set-control">
                   <n-switch :value="settings.captchaEnabled === 'true'" @update:value="(v: boolean) => (settings.captchaEnabled = String(v))" />
@@ -329,12 +331,31 @@ async function saveSettings() {
                     @blur="!settings.capSecret && secretSet && (settings.capSecret = SECRET_MASK)"
                   />
                 </div>
-                <div class="set-row sub">
-                  <div class="set-desc">
-                    {{ t('需要先部署') }} <a href="https://capjs.js.org/guide/standalone/" target="_blank" rel="noopener">Cap Standalone</a>{{ t('， 在它的控制台创建一个密钥，把 Site Key 和 Secret 填到这里。三项都填写后才会生效，保存后登录页立即显示验证码。 如果 Cap 服务出问题导致无法登录，可以设置环境变量') }} <code>LEGADO_CAPTCHA_DISABLED=true</code> {{ t('重启服务临时关闭。') }}
-                  </div>
-                </div>
               </template>
+              <div class="set-row">
+                <div class="set-text">
+                  <div class="set-label">{{ t('同一用户名输错锁定（次）') }}</div>
+                </div>
+                <div class="set-control">
+                  <n-input-number :value="Number(settings.loginMaxFails ?? 5)" :min="0" size="small" class="num" @update:value="(v: number | null) => (settings.loginMaxFails = String(v ?? 5))" />
+                </div>
+              </div>
+              <div class="set-row">
+                <div class="set-text">
+                  <div class="set-label">{{ t('同一 IP 失败锁定（次）') }}</div>
+                </div>
+                <div class="set-control">
+                  <n-input-number :value="Number(settings.loginIpMaxFails ?? 20)" :min="0" size="small" class="num" @update:value="(v: number | null) => (settings.loginIpMaxFails = String(v ?? 20))" />
+                </div>
+              </div>
+              <div class="set-row">
+                <div class="set-text">
+                  <div class="set-label">{{ t('锁定时长（秒）') }}</div>
+                </div>
+                <div class="set-control">
+                  <n-input-number :value="Number(settings.loginLockSeconds ?? 300)" :min="1" size="small" class="num" @update:value="(v: number | null) => (settings.loginLockSeconds = String(v ?? 300))" />
+                </div>
+              </div>
             </div>
           </section>
 
@@ -344,7 +365,6 @@ async function saveSettings() {
               <div class="set-row">
                 <div class="set-text">
                   <div class="set-label">{{ t('允许所有用户添加书源') }}</div>
-                  <div class="set-desc">{{ t('书源中的 JavaScript 在服务器上执行，可以让服务器访问外部网址，请只对信任的用户开放；也可以在“用户”列表中单独授权某些用户') }}</div>
                 </div>
                 <div class="set-control">
                   <n-switch :value="settings.allowUserSources === 'true'" @update:value="(v: boolean) => (settings.allowUserSources = String(v))" />
@@ -353,7 +373,6 @@ async function saveSettings() {
               <div class="set-row stack">
                 <div class="set-text">
                   <div class="set-label">{{ t('允许访问的内网地址') }}</div>
-                  <div class="set-desc">{{ t('书源、书籍地址和浏览器始终不能访问本机和内网（包括云服务器元数据地址），自己局域网里的书源服务可以加到这里') }}</div>
                 </div>
                 <n-input
                   v-model:value="settings.privateNetworkAllowlist"
@@ -367,12 +386,39 @@ async function saveSettings() {
           </section>
 
           <section class="set-group">
+            <h3 class="set-group-title"><n-icon :component="SpeedometerOutline" />{{ t('书源请求') }}</h3>
+            <div class="set-card">
+              <div class="set-row">
+                <div class="set-text"><div class="set-label">{{ t('搜索并发数') }}</div></div>
+                <div class="set-control">
+                  <n-input-number :value="Number(settings.searchConcurrency ?? 16)" :min="1" size="small" class="num" @update:value="(v: number | null) => (settings.searchConcurrency = String(v ?? 16))" />
+                </div>
+              </div>
+              <div class="set-row">
+                <div class="set-text"><div class="set-label">{{ t('单书源搜索超时（秒）') }}</div></div>
+                <div class="set-control">
+                  <n-input-number :value="Number(settings.searchTimeoutSeconds ?? 30)" :min="1" size="small" class="num" @update:value="(v: number | null) => (settings.searchTimeoutSeconds = String(v ?? 30))" />
+                </div>
+              </div>
+              <div class="set-row">
+                <div class="set-text"><div class="set-label">{{ t('目录、正文多页并发数') }}</div></div>
+                <div class="set-control">
+                  <n-input-number :value="Number(settings.threadCount ?? 8)" :min="1" size="small" class="num" @update:value="(v: number | null) => (settings.threadCount = String(v ?? 8))" />
+                </div>
+              </div>
+              <div class="set-row stack">
+                <div class="set-text"><div class="set-label">User-Agent</div></div>
+                <n-input v-model:value="settings.userAgent" class="mono" :placeholder="t('留空使用内置的 Chrome UA')" />
+              </div>
+            </div>
+          </section>
+
+          <section class="set-group">
             <h3 class="set-group-title"><n-icon :component="GlobeOutline" />{{ t('浏览器') }}</h3>
             <div class="set-card">
               <div class="set-row stack">
                 <div class="set-text">
-                  <div class="set-label">{{ t('浏览器调试地址') }}</div>
-                  <div class="set-desc">{{ t('浏览器的 Chrome DevTools Protocol 地址，webView 书源和远程浏览器使用，保存后立即生效。每次打开网页都使用新的浏览器上下文（相当于无痕窗口），用完销毁。调试端口没有密码，不要暴露到公网。') }}</div>
+                  <div class="set-label">{{ t('浏览器调试地址') }}<help-tip>{{ t('Chrome DevTools Protocol 地址，供 webView 书源使用') }}</help-tip></div>
                 </div>
                 <div class="browser-cdp">
                   <n-input
@@ -385,8 +431,7 @@ async function saveSettings() {
               </div>
               <div class="set-row">
                 <div class="set-text">
-                  <div class="set-label">{{ t('使用远程浏览器') }}</div>
-                  <div class="set-desc">{{ t('书源要打开网页让用户操作（人机验证、登录）时，在服务器的浏览器里打开并把画面实时传给用户，同一时间只打开一个，其余排队；关闭时下载网页交给前端显示。') }}</div>
+                  <div class="set-label">{{ t('使用远程浏览器') }}<help-tip>{{ t('书源要打开的网页在服务器的浏览器中打开，并实时显示画面') }}</help-tip></div>
                 </div>
                 <div class="set-control">
                   <n-switch :value="settings.remoteBrowserEnabled === 'true'" @update:value="(v: boolean) => (settings.remoteBrowserEnabled = String(v))" />
@@ -405,8 +450,7 @@ async function saveSettings() {
             <div class="set-card">
               <div class="set-row">
                 <div class="set-text">
-                  <div class="set-label">{{ t('允许上传本地书籍') }}</div>
-                  <div class="set-desc">{{ t('用户可以把 EPUB、TXT、MOBI、AZW3、UMD、PDF 上传到自己的书架') }}</div>
+                  <div class="set-label">{{ t('允许上传本地书籍') }}<help-tip>{{ t('支持 EPUB、TXT、MOBI、AZW3、UMD、PDF') }}</help-tip></div>
                 </div>
                 <div class="set-control">
                   <n-switch :value="settings.localBookEnabled !== 'false'" @update:value="(v: boolean) => (settings.localBookEnabled = String(v))" />
@@ -437,7 +481,7 @@ async function saveSettings() {
                   <div class="set-label">{{ t('当前版本') }}</div>
                   <div class="set-desc">
                     <template v-if="updateStatus?.buildTime"><span class="mono">{{ versionName(updateStatus.buildTime) }}</span> · {{ t('构建于 {0}', [buildTimeText(updateStatus.buildTime)]) }}</template>
-                    <template v-else>{{ t('开发版（不是从 Docker 镜像运行，没有构建时间，不检查更新）') }}</template>
+                    <template v-else>{{ t('开发版（不检查更新）') }}</template>
                   </div>
                 </div>
               </div>
@@ -462,7 +506,6 @@ async function saveSettings() {
               <div class="set-row">
                 <div class="set-text">
                   <div class="set-label">{{ t('自动检查更新') }}</div>
-                  <div class="set-desc">{{ t('管理员打开网页时查询镜像仓库（30 分钟内最多一次），有新版本时提示，只有管理员能看到') }}</div>
                 </div>
                 <div class="set-control">
                   <n-switch :value="settings.updateCheckEnabled !== 'false'" @update:value="(v: boolean) => (settings.updateCheckEnabled = String(v))" />

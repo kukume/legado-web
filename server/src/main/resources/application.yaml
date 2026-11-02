@@ -28,15 +28,8 @@ legado:
     issuer: "legado-web"
     expireDays: "$LEGADO_JWT_EXPIRE_DAYS:30"
   engine:
-    userAgent: "$LEGADO_USER_AGENT:"
     # 书源登录信息的加密密钥（留空时自动生成并保存到 dataDir/.engine-secret）
     secret: "$LEGADO_ENGINE_SECRET:"
-    # 目录、正文多页并发数
-    threadCount: "$LEGADO_THREAD_COUNT:8"
-    # 多书源搜索并发数
-    searchConcurrency: "$LEGADO_SEARCH_CONCURRENCY:16"
-    # 单书源搜索超时（毫秒）
-    searchTimeout: "$LEGADO_SEARCH_TIMEOUT:30000"
   # 允许跨域的前端地址（逗号分隔，开发时可设为 http://localhost:5173）
   cors: "$LEGADO_CORS:"
   captcha:

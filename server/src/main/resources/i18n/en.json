@@ -5,6 +5,7 @@
   "未登录或登录已过期": "Not signed in or the session has expired",
   "没有权限": "Permission denied",
   "资源不存在": "Not found",
+  "任务不存在或已过期": "The task does not exist or has expired",
   "未知错误": "Unknown error",
   "接口不存在": "API not found",
   "需要管理员权限": "Admin permission required",
@@ -173,7 +174,7 @@
   "单次朗读的文字过长": "Too much text to read aloud at once",
   "朗读引擎返回的音频过大": "The audio returned by the read-aloud engine is too large",
   "朗读引擎没有返回音频": "The read-aloud engine returned no audio",
-  "用户名为 2-32 位字母、数字、下划线或中文": "Usernames are 2-32 letters, digits, underscores or Chinese characters",
+  "用户名为 4-32 位字母、数字、下划线或中文": "Usernames are 4-32 letters, digits, underscores or Chinese characters",
   "密码至少 6 位": "Password must be at least 6 characters",
   "用户名已存在": "Username already taken",
   "系统已关闭注册": "Registration is closed",
@@ -233,5 +234,8 @@
   "书源没有搜索，跳过校验": "The source has no search; skipped",
   "请先勾选书源": "Select some sources first",
   "这是 zip 压缩包，不是电子书（只支持 EPUB、TXT、MOBI、AZW3、AZW、UMD、PDF）": "This is a zip archive, not an e-book (only EPUB, TXT, MOBI, AZW3, AZW, UMD and PDF are supported)",
-  "无法识别文本编码（可能不是文本文件）": "Unrecognized text encoding (this may not be a text file)"
+  "无法识别文本编码（可能不是文本文件）": "Unrecognized text encoding (this may not be a text file)",
+  "失败次数过多，请 {0} 秒后再试": "Too many failed attempts. Try again in {0} seconds",
+  "失败次数和锁定时长需要是不小于 0 的整数": "Failure limits and lock duration must be whole numbers of 0 or more",
+  "并发数和超时需要是大于 0 的整数": "Concurrency and timeout must be whole numbers greater than 0"
 }

@@ -92,6 +92,7 @@ class UnauthorizedException(msg: String = "未登录或登录已过期") : Runti
 class ForbiddenException(msg: String = "没有权限") : RuntimeException(msg)
 class BadRequestException(msg: String) : RuntimeException(msg)
 class NotFoundException(msg: String = "资源不存在") : RuntimeException(msg)
+class TooManyRequestsException(msg: String) : RuntimeException(msg)
 
 fun ApplicationCall.requireAdmin(): UserPrincipal {
     val u = user

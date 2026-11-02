@@ -3,7 +3,6 @@ package io.legado.web.service
 import io.legado.web.security.ScriptUrls
 import io.legado.app.data.entities.SearchBook
 import io.legado.web.auth.UserPrincipal
-import io.legado.web.config.AppSettings
 import io.legado.web.engine.runEngine
 import io.legado.app.model.webBook.WebBook
 import kotlinx.coroutines.CancellationException
@@ -43,8 +42,11 @@ sealed interface SearchEvent {
 
 class SearchService(
     private val sourceService: SourceService,
-    private val settings: AppSettings,
+    private val settings: SettingService,
 ) {
+    /** 单书源搜索超时（毫秒），系统设置里修改 */
+    private val searchTimeout get() = settings.getInt(SettingService.SEARCH_TIMEOUT_SECONDS).coerceAtLeast(1) * 1000L
+
     private val logger = LoggerFactory.getLogger(SearchService::class.java)
 
     /**
@@ -64,7 +66,7 @@ class SearchService(
             emit(SearchEvent.Progress(0, 0, "", "没有可用的书源"))
             return@coroutineScope
         }
-        val semaphore = Semaphore(settings.searchConcurrency)
+        val semaphore = Semaphore(settings.getInt(SettingService.SEARCH_CONCURRENCY).coerceAtLeast(1))
         val events = Channel<SearchEvent>(Channel.UNLIMITED)
         var done = 0
         val job = launch {
@@ -74,7 +76,7 @@ class SearchService(
                         val start = System.currentTimeMillis()
                         var error: String? = null
                         try {
-                            val books = runEngine(user.id, settings.searchTimeout) {
+                            val books = runEngine(user.id, searchTimeout) {
                                 WebBook.searchBookAwait(stored.source, key, page)
                             }
                             val time = System.currentTimeMillis() - start
@@ -129,7 +131,7 @@ class SearchService(
     suspend fun searchInSource(user: UserPrincipal, sourceId: Long, key: String, page: Int): List<SearchResultItem> {
         val stored = sourceService.get(user, sourceId)
         val start = System.currentTimeMillis()
-        val books = runEngine(user.id, settings.searchTimeout) {
+        val books = runEngine(user.id, searchTimeout) {
             WebBook.searchBookAwait(stored.source, key, page)
         }
         return books.map { it.toItem(user.id, stored.id, System.currentTimeMillis() - start) }
@@ -144,7 +146,7 @@ class SearchService(
         val start = System.currentTimeMillis()
         val ctx = io.legado.app.help.engine.EngineContext(user.id)
         val books = try {
-            runEngine(user.id, settings.searchTimeout * 2, ctx = ctx) {
+            runEngine(user.id, searchTimeout * 2, ctx = ctx) {
                 WebBook.exploreBookAwait(stored.source, url, page)
             }
         } catch (e: Exception) {

@@ -43,6 +43,20 @@ class SettingService {
         const val REMOTE_BROWSER_ENABLED = "remoteBrowserEnabled"
         /** 浏览器的调试地址（Chrome DevTools Protocol，如 http://browser:9222）：webView 书源和远程浏览器使用，留空时不使用浏览器 */
         const val BROWSER_CDP = "browserCdp"
+        /** 同一 IP 对同一用户名连续输错几次密码后锁定，0 表示不限制（见 LoginGuard） */
+        const val LOGIN_MAX_FAILS = "loginMaxFails"
+        /** 同一 IP 登录、注册累计失败几次后锁定整个 IP，0 表示不限制 */
+        const val LOGIN_IP_MAX_FAILS = "loginIpMaxFails"
+        /** 锁定秒数 */
+        const val LOGIN_LOCK_SECONDS = "loginLockSeconds"
+        /** 多书源搜索并发数 */
+        const val SEARCH_CONCURRENCY = "searchConcurrency"
+        /** 单书源搜索超时（秒） */
+        const val SEARCH_TIMEOUT_SECONDS = "searchTimeoutSeconds"
+        /** 目录、正文多页并发数 */
+        const val THREAD_COUNT = "threadCount"
+        /** 书源请求默认的 User-Agent，留空使用内置的 Chrome UA */
+        const val USER_AGENT = "userAgent"
         /** 管理员打开网页时检查镜像仓库里是否有新版本（只提示管理员） */
         const val UPDATE_CHECK_ENABLED = "updateCheckEnabled"
         /** 读取设置时密钥的占位符；保存时收到它表示“不修改” */
@@ -64,6 +78,13 @@ class SettingService {
             REMOTE_BROWSER_ENABLED to "false",
             BROWSER_CDP to "",
             UPDATE_CHECK_ENABLED to "true",
+            LOGIN_MAX_FAILS to "5",
+            LOGIN_IP_MAX_FAILS to "20",
+            LOGIN_LOCK_SECONDS to "300",
+            SEARCH_CONCURRENCY to "16",
+            SEARCH_TIMEOUT_SECONDS to "30",
+            THREAD_COUNT to "8",
+            USER_AGENT to "",
         )
     }
 
@@ -102,6 +123,14 @@ class SettingService {
             if (!Regex("^(https?|wss?)://", RegexOption.IGNORE_CASE).containsMatchIn(it)) {
                 throw io.legado.web.auth.BadRequestException("浏览器调试地址需要以 http:// 或 ws:// 开头")
             }
+        }
+        for (k in listOf(LOGIN_MAX_FAILS, LOGIN_IP_MAX_FAILS, LOGIN_LOCK_SECONDS)) {
+            val v = allowed[k] ?: continue
+            if ((v.trim().toIntOrNull() ?: -1) < 0) throw io.legado.web.auth.BadRequestException("失败次数和锁定时长需要是不小于 0 的整数")
+        }
+        for (k in listOf(SEARCH_CONCURRENCY, SEARCH_TIMEOUT_SECONDS, THREAD_COUNT)) {
+            val v = allowed[k] ?: continue
+            if ((v.trim().toIntOrNull() ?: 0) < 1) throw io.legado.web.auth.BadRequestException("并发数和超时需要是大于 0 的整数")
         }
         if (allowed[REGISTRATION_MODE]?.let { it !in setOf("invite", "closed") } == true) {
             throw io.legado.web.auth.BadRequestException("registrationMode 只能是 invite/closed")

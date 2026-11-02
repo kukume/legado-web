@@ -87,9 +87,6 @@ function removeAll() {
 
 <template>
   <div>
-    <p class="muted small" style="margin-top: 0">
-      {{ t('在书籍详情页点“离线下载”，把章节保存到这台设备，没有网络时也能阅读；离线期间的阅读进度会在联网后自动同步。') }}
-    </p>
     <div class="summary small">
       <span>{{ t('离线书籍 {0} 本，约 {1}', [rows.length, fmtSize(totalSize)]) }}</span>
       <span v-if="usage" class="muted">{{ t('· 浏览器已用 {0} / 可用 {1}', [fmtSize(usage.usage), fmtSize(usage.quota)]) }}</span>

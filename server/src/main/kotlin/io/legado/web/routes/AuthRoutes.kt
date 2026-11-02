@@ -11,7 +11,9 @@ import io.ktor.server.routing.post
 import io.ktor.server.routing.put
 import io.ktor.server.routing.route
 import io.legado.web.auth.AUTH_JWT
+import io.legado.web.auth.BadRequestException
 import io.legado.web.auth.JwtService
+import io.legado.web.auth.LoginGuard
 import io.legado.web.auth.requireAdmin
 import io.legado.web.auth.user
 import io.legado.web.service.CaptchaService
@@ -60,6 +62,7 @@ fun Route.authRoutes(
     captcha: CaptchaService,
     updates: io.legado.web.service.UpdateService,
 ) {
+    val loginGuard = LoginGuard(settings)
     route("/api/auth") {
         get("/config") {
             call.respond(
@@ -73,14 +76,27 @@ fun Route.authRoutes(
         }
         post("/login") {
             val req = call.receive<LoginRequest>()
+            loginGuard.checkLogin(call, req.username)
             captcha.verify(req.captchaToken)
-            val u = userService.login(req.username, req.password)
+            val u = try {
+                userService.login(req.username, req.password)
+            } catch (e: BadRequestException) {
+                loginGuard.onLoginFailure(call, req.username)
+                throw e
+            }
+            loginGuard.onLoginSuccess(call, req.username)
             call.respond(AuthResponse(jwt.createToken(u.id, u.username, u.role, u.tokenVersion), u))
         }
         post("/register") {
             val req = call.receive<RegisterRequest>()
+            loginGuard.checkRegister(call)
             captcha.verify(req.captchaToken)
-            val u = userService.register(req.username, req.password, req.inviteCode)
+            val u = try {
+                userService.register(req.username, req.password, req.inviteCode)
+            } catch (e: BadRequestException) {
+                loginGuard.onRegisterFailure(call)
+                throw e
+            }
             call.respond(AuthResponse(jwt.createToken(u.id, u.username, u.role, u.tokenVersion), u))
         }
         authenticate(AUTH_JWT) {

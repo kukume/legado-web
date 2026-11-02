@@ -101,7 +101,12 @@ export async function request<T = any>(
   }
   if (!res.ok) throw await parseError(res)
   const text = await res.text()
-  return (text ? JSON.parse(text) : undefined) as T
+  const data = text ? JSON.parse(text) : undefined
+  // 处理时间较长（如书源脚本等用户在网页里登录）：服务器先返回 202，再分段等待结果，避免反向代理超时（Cloudflare 524）
+  if (res.status === 202 && typeof data?.pending === 'string') {
+    return request<T>('GET', `/api/jobs/${encodeURIComponent(data.pending)}`, undefined, { signal: opts.signal })
+  }
+  return data as T
 }
 
 export const http = {

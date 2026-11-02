@@ -215,9 +215,6 @@ const columns = computed<DataTableColumns<DictRule>>(() => isMobile.value ? mobi
 <template>
   <div>
     <div class="rule-toolbar">
-      <p class="muted rule-desc">
-        {{ t('阅读时选中文字，点“字典”即可用这些规则查词、翻译。与阅读 App 的字典规则格式相同：网址规则同书源的网址规则（{0} 为选中的文字），显示规则用来提取显示的内容。', [KEY_VAR]) }}
-      </p>
       <n-checkbox v-if="isMobile" class="select-all" :checked="selectAll.all.value" :indeterminate="selectAll.some.value" @update:checked="selectAll.toggleAll">{{ t('全选') }}</n-checkbox>
       <n-button size="small" :disabled="!checked.length" type="error" ghost @click="remove(checked)">{{ t('删除选中') }}</n-button>
       <n-button size="small" @click="exportRules">{{ t('导出') }}</n-button>

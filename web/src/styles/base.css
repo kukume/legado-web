@@ -62,26 +62,14 @@ a {
   min-width: 120px;
 }
 
-/* 规则页各标签顶部：说明文字 + 操作按钮 */
+/* 规则页各标签顶部：操作按钮靠右 */
 .rule-toolbar {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
   flex-wrap: wrap;
   margin-bottom: 12px;
-}
-
-.rule-desc {
-  flex: 1 1 260px;
-  margin: 0;
-  font-size: 13px;
-}
-
-/* 手机：说明独占一行，全选和按钮排在下面 */
-@media (max-width: 767px) {
-  .rule-desc {
-    flex-basis: 100%;
-  }
 }
 
 .muted {
@@ -164,9 +152,9 @@ a {
   white-space: nowrap;
 }
 
-/* 工具栏里的全选（手机） */
+/* 工具栏里的全选（手机）：靠左，按钮靠右 */
 .select-all {
-  margin-right: 4px;
+  margin-right: auto;
 }
 
 /* 远程浏览器弹窗：手机上占满屏幕宽度，网页视口尽量接近手机屏幕（弹窗挂在 body 下，不能用组件内样式） */

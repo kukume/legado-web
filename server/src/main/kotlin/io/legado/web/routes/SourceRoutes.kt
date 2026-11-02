@@ -134,11 +134,11 @@ fun Route.sourceRoutes(
             }
             post("/{id}/login") {
                 val body = call.receive<LoginRequestBody>()
-                call.respond(configService.login(call.user, call.longParam("id"), body.info))
+                call.respondLong { configService.login(call.user, call.longParam("id"), body.info) }
             }
             // 登录地址是网址：在远程浏览器中打开登录页，等用户操作完成
             post("/{id}/web-login") {
-                call.respond(configService.webLogin(call.user, call.longParam("id")))
+                call.respondLong { configService.webLogin(call.user, call.longParam("id")) }
             }
             // 只保存登录界面中填写的内容（不执行 login 函数）
             post("/{id}/login-info") {
@@ -148,16 +148,16 @@ fun Route.sourceRoutes(
             }
             post("/{id}/action") {
                 val body = call.receive<ActionRequestBody>()
-                call.respond(configService.runAction(call.user, call.longParam("id"), body.action, body.info, body.isLongClick))
+                call.respondLong { configService.runAction(call.user, call.longParam("id"), body.action, body.info, body.isLongClick) }
             }
             // 登录界面 v2（{"version":2}）
             post("/{id}/login/v2/render") {
                 val body = call.receive<LoginV2RenderBody>()
-                call.respond(configService.loginV2Render(call.user, call.longParam("id"), body.state))
+                call.respondLong { configService.loginV2Render(call.user, call.longParam("id"), body.state) }
             }
             post("/{id}/login/v2/action") {
                 val body = call.receive<LoginV2ActionBody>()
-                call.respond(configService.loginV2Action(call.user, call.longParam("id"), body.action, body.state, body.form))
+                call.respondLong { configService.loginV2Action(call.user, call.longParam("id"), body.action, body.state, body.form) }
             }
             delete("/{id}/login") {
                 configService.logout(call.user, call.longParam("id"))
@@ -179,19 +179,19 @@ fun Route.sourceRoutes(
             // ---- 发现 ----
             get("/{id}/explore") {
                 val refresh = call.request.queryParameters["refresh"] == "true"
-                call.respond(configService.exploreKinds(call.user, call.longParam("id"), refresh))
+                call.respondLong { configService.exploreKinds(call.user, call.longParam("id"), refresh) }
             }
             post("/{id}/explore/action") {
                 val body = call.receive<ExploreActionBody>()
-                call.respond(
+                call.respondLong {
                     configService.exploreAction(call.user, call.longParam("id"), body.title, body.value, body.action)
-                )
+                }
             }
         }
 
         post("/api/explore") {
             val req = call.receive<ExploreRequest>()
-            call.respond(searchService.explore(call.user, req.sourceId, req.url, req.page))
+            call.respondLong { searchService.explore(call.user, req.sourceId, req.url, req.page) }
         }
 
         /**

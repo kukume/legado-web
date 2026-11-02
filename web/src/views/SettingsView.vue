@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { NButton, NCard, NDescriptions, NDescriptionsItem, NInput, NRadioButton, NRadioGroup, NSpace, useMessage } from 'naive-ui'
 import ApiKeyManager from '@/components/ApiKeyManager.vue'
+import HelpTip from '@/components/HelpTip.vue'
 import OfflineManager from '@/components/OfflineManager.vue'
 import BackupManager from '@/components/BackupManager.vue'
 import ReadingStatsCard from '@/components/ReadingStatsCard.vue'
@@ -18,6 +19,7 @@ const router = useRouter()
 const message = useMessage()
 
 const pwd = ref({ old: '', new1: '', new2: '' })
+const apiKeys = ref<InstanceType<typeof ApiKeyManager> | null>(null)
 const saving = ref(false)
 
 async function changePassword() {
@@ -61,26 +63,29 @@ function logout() {
     </n-card>
 
     <n-card :title="t('外观')" size="small" class="block">
-      <n-radio-group v-model:value="ui.themeMode" size="small">
-        <n-radio-button value="auto">{{ t('跟随系统') }}</n-radio-button>
-        <n-radio-button value="light">{{ t('浅色') }}</n-radio-button>
-        <n-radio-button value="dark">{{ t('深色') }}</n-radio-button>
-      </n-radio-group>
-      <p class="muted small">{{ t('阅读页的主题、字体、排版在阅读时点击屏幕中间 → 设置 中调整，会同步到你的所有设备。') }}</p>
-      <div class="lang-row">
-        <span>{{ t('界面语言') }}</span>
+      <div class="pref-row">
+        <span class="pref-label">{{ t('主题') }}</span>
+        <n-radio-group v-model:value="ui.themeMode" size="small">
+          <n-radio-button value="auto">{{ t('跟随系统') }}</n-radio-button>
+          <n-radio-button value="light">{{ t('浅色') }}</n-radio-button>
+          <n-radio-button value="dark">{{ t('深色') }}</n-radio-button>
+        </n-radio-group>
+      </div>
+      <div class="pref-row">
+        <span class="pref-label">{{ t('界面语言') }}</span>
         <n-radio-group :value="locale" size="small" @update:value="setLocale">
           <n-radio-button v-for="l in LOCALES" :key="l.value" :value="l.value">{{ l.label }}</n-radio-button>
         </n-radio-group>
       </div>
-      <p class="muted small">{{ t('只对这台设备上的浏览器生效，切换后页面会刷新。') }}</p>
     </n-card>
 
-    <n-card :title="t('离线阅读')" size="small" class="block">
+    <n-card size="small" class="block">
+      <template #header>{{ t('离线阅读') }}<help-tip>{{ t('在书籍详情页点“离线下载”，没有网络也能阅读，进度联网后自动同步') }}</help-tip></template>
       <offline-manager />
     </n-card>
 
-    <n-card :title="t('备份与恢复')" size="small" class="block">
+    <n-card size="small" class="block">
+      <template #header>{{ t('备份与恢复') }}<help-tip>{{ t('备份文件与阅读 App 通用') }}</help-tip></template>
       <backup-manager />
     </n-card>
 
@@ -94,7 +99,10 @@ function logout() {
     </n-card>
 
     <n-card :title="t('API Key（开放接口）')" size="small" class="block">
-      <api-key-manager />
+      <template #header-extra>
+        <n-button size="small" type="primary" @click="apiKeys?.openCreate()">{{ t('生成 API Key') }}</n-button>
+      </template>
+      <api-key-manager ref="apiKeys" />
     </n-card>
   </div>
 </template>
@@ -112,11 +120,18 @@ function logout() {
   font-size: 13px;
 }
 
-.lang-row {
+.pref-row {
   display: flex;
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.pref-row + .pref-row {
   margin-top: 12px;
+}
+
+.pref-label {
+  min-width: 4em;
 }
 </style>

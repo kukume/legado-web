@@ -50,7 +50,7 @@ data class InviteDto(
 
 class UserService(private val settings: SettingService) {
 
-    private val usernameRegex = Regex("^[A-Za-z0-9_\\-\\u4e00-\\u9fa5]{2,32}$")
+    private val usernameRegex = Regex("^[A-Za-z0-9_\\-\\u4e00-\\u9fa5]{4,32}$")
 
     /** 短时间缓存用户状态，避免每个请求都查库 */
     private data class Cached(val user: UserDto?, val at: Long)
@@ -87,7 +87,7 @@ class UserService(private val settings: SettingService) {
     suspend fun register(username: String, password: String, inviteCode: String?): UserDto {
         val name = username.trim()
         if (!usernameRegex.matches(name)) {
-            throw BadRequestException("用户名为 2-32 位字母、数字、下划线或中文")
+            throw BadRequestException("用户名为 4-32 位字母、数字、下划线或中文")
         }
         if (password.length < 6) throw BadRequestException("密码至少 6 位")
         val mode = settings.get(SettingService.REGISTRATION_MODE)
@@ -147,7 +147,7 @@ class UserService(private val settings: SettingService) {
     suspend fun adminCreate(operatorId: Long, username: String, password: String): UserDto {
         val name = username.trim()
         if (!usernameRegex.matches(name)) {
-            throw BadRequestException("用户名为 2-32 位字母、数字、下划线或中文")
+            throw BadRequestException("用户名为 4-32 位字母、数字、下划线或中文")
         }
         if (password.length < 6) throw BadRequestException("密码至少 6 位")
         return dbQuery {

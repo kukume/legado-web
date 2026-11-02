@@ -89,7 +89,6 @@ const columns: DataTableColumns<Invite> = [
 <template>
   <div>
     <div class="bar">
-      <span class="muted small">{{ t('把邀请码或邀请链接发给朋友，他们就可以注册账号。') }}</span>
       <div style="flex: 1" />
       <n-button size="small" type="primary" @click="show = true">{{ t('生成邀请码') }}</n-button>
     </div>
