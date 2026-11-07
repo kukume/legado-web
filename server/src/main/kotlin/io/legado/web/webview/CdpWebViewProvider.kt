@@ -66,9 +66,13 @@ class CdpWebViewProvider(
     @Volatile
     private var lastUsed = 0L
 
+    /** 取得连接并登记为使用中（在锁内登记：否则空闲断开可能在拿到连接、还没登记时把它关掉） */
     private suspend fun connection(): Pair<CdpConnection, String> = startLock.withLock {
         val addr = cdp() ?: throw io.legado.app.exception.NoStackTraceException("没有设置浏览器")
-        connection?.takeIf { it.isOpen && connectedTo == addr }?.let { return it to addr }
+        connection?.takeIf { it.isOpen && connectedTo == addr }?.let {
+            active.incrementAndGet()
+            return it to addr
+        }
         // 地址改了（后台设置）或连接断了：重新连接
         connection?.let { runCatching { it.close() } }
         val (wsUrl, host) = kotlinx.coroutines.withContext(Dispatchers.IO) { RemoteCdp.resolve(addr) }
@@ -78,6 +82,7 @@ class CdpWebViewProvider(
         connectedTo = addr
         logger.info("已连接浏览器: {}", addr)
         contexts.cleanup(addr, conn)
+        active.incrementAndGet()
         conn to addr
     }
 
@@ -99,7 +104,6 @@ class CdpWebViewProvider(
 
     override suspend fun load(request: WebViewProvider.Request): WebViewProvider.Result = pageLimit.withPermit {
         val (conn, addr) = connection()
-        active.incrementAndGet()
         var contextId: String? = null
         var targetId: String? = null
         try {

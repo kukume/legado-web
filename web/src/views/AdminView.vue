@@ -4,7 +4,7 @@ import {
   NAlert, NButton, NDataTable, NIcon, NInput, NInputNumber, NModal, NRadioButton, NRadioGroup,
   NSpace, NSwitch, NTabs, NTabPane, useDialog, useMessage, type DataTableColumns,
 } from 'naive-ui'
-import { BookOutline, CloudDownloadOutline, GlobeOutline, HomeOutline, LockClosedOutline, PeopleOutline, ShieldCheckmarkOutline, SpeedometerOutline } from '@vicons/ionicons5'
+import { BookOutline, CloudDownloadOutline, GlobeOutline, HomeOutline, LockClosedOutline, LogoGithub, PeopleOutline, ShieldCheckmarkOutline, SpeedometerOutline } from '@vicons/ionicons5'
 import InviteManager from '@/components/InviteManager.vue'
 import HelpTip from '@/components/HelpTip.vue'
 import { useIsMobile } from '@/composables/useIsMobile'
@@ -483,6 +483,11 @@ async function saveSettings() {
                     <template v-if="updateStatus?.buildTime"><span class="mono">{{ versionName(updateStatus.buildTime) }}</span> · {{ t('构建于 {0}', [buildTimeText(updateStatus.buildTime)]) }}</template>
                     <template v-else>{{ t('开发版（不检查更新）') }}</template>
                   </div>
+                </div>
+                <div class="set-control">
+                  <n-button size="small" tag="a" href="https://github.com/kukume/legado-web" target="_blank" rel="noopener">
+                    <template #icon><n-icon :component="LogoGithub" /></template>GitHub
+                  </n-button>
                 </div>
               </div>
               <div v-if="updateStatus?.buildTime" class="set-row">

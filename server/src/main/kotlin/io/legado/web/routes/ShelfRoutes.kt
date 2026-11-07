@@ -51,6 +51,12 @@ data class IdsRequest(val ids: List<Long> = emptyList())
 
 private val backgroundScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+/** 正在后台更新整个书架的用户 */
+private val refreshingUsers: MutableSet<Long> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+/** 更新整个书架时同时更新的书数 */
+private const val SHELF_REFRESH_CONCURRENCY = 4
+
 data class TxtTocRequest(val tocUrl: String = "")
 
 data class OrderRequest(val ids: List<Long> = emptyList())
@@ -81,9 +87,23 @@ fun Route.shelfRoutes(
             /** 刷新书架所有书籍的目录（后台执行） */
             post("/refresh") {
                 val u = call.user
-                val books = shelfService.shelf(u).filter { it.canUpdate }
+                val books = shelfService.shelf(u).filter { it.canUpdate && !it.isLocal }
+                // 同一用户同时只跑一次（连续点击不会重复更新整个书架），几本书一起更新
+                if (!refreshingUsers.add(u.id)) {
+                    call.respond(OkResponse(message = "书架正在更新中"))
+                    return@post
+                }
                 backgroundScope.launch {
-                    books.filter { !it.isLocal }.forEach { b -> runCatching { shelfService.refreshToc(u, b.id) } }
+                    try {
+                        val limit = kotlinx.coroutines.sync.Semaphore(SHELF_REFRESH_CONCURRENCY)
+                        kotlinx.coroutines.coroutineScope {
+                            books.forEach { b ->
+                                launch { limit.acquire(); try { runCatching { shelfService.refreshToc(u, b.id) } } finally { limit.release() } }
+                            }
+                        }
+                    } finally {
+                        refreshingUsers.remove(u.id)
+                    }
                 }
                 call.respond(OkResponse(message = "已开始更新 ${books.size} 本书"))
             }
@@ -208,7 +228,9 @@ fun Route.shelfRoutes(
             }
             put("/{id}/progress") {
                 val req = call.receive<ProgressRequest>()
-                val applied = shelfService.saveProgress(call.user, call.longParam("id"), req.index, req.pos, req.title, req.time)
+                val applied = shelfService.saveProgress(
+                    call.user, call.longParam("id"), req.index, req.pos, req.title, req.time, call.request.headers["X-Client-Id"],
+                )
                 call.respond(OkResponse(message = if (applied) null else "服务器上的进度更新，已忽略"))
             }
             post("/{id}/cache") {
@@ -282,6 +304,7 @@ fun Route.shelfRoutes(
                         it[value] = body
                     }
                 }
+                if (key == io.legado.web.service.ProgressEvents.PREF_KEY) io.legado.web.service.ProgressEvents.invalidate(uid)
                 call.respond(OkResponse())
             }
         }

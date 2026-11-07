@@ -151,13 +151,14 @@ export const useOfflineStore = defineStore('offline', () => {
 
   /**
    * 记录进度：先写本地，再尝试同步到服务器。
-   * 服务器按时间比较，只接受更新的进度（多设备以最后阅读的为准）。
+   * 在线时以服务器时间记录（不带本机时间）：本机时钟比服务器慢时，带本机时间会被当成“更早的进度”而忽略，
+   * 其他端（如 IDE 插件，以服务器时间保存）的进度之后就一直存不上。离线期间的进度联网后才按本机时间比较（syncProgress）
    */
   async function saveProgress(bookId: number, index: number, pos: number, title: string) {
     const time = Date.now()
     await putLocalProgress({ bookId, index, pos, title, time, dirty: true }).catch(() => {})
     try {
-      await shelfApi.progress(bookId, index, pos, title, time)
+      await shelfApi.progress(bookId, index, pos, title)
       await markProgressSynced(bookId, time).catch(() => {})
       online.value = true
     } catch (e) {

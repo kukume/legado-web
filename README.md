@@ -81,7 +81,7 @@ java -jar server/build/libs/legado-web.jar
 
 网页版的限制：
 
-- `webView:true`、`java.webView()`、资源嗅探需要浏览器：服务本身不启动浏览器，在后台“系统设置”的“浏览器调试地址”中填写一个浏览器的调试地址（Chrome DevTools Protocol）。Docker 下按 `docker-compose.yml` 中的 `browser` 服务另外启动，填 `http://cloak:9222`；本地开发可用 `chrome --remote-debugging-port=9222 --user-data-dir=<临时目录>` 启动后填 `http://127.0.0.1:9222`
+- `webView:true`、`java.webView()`、资源嗅探需要浏览器：服务本身不启动浏览器，在后台“系统设置”的“浏览器调试地址”中填写一个浏览器的调试地址（Chrome DevTools Protocol）。Docker 下取消 `docker-compose.yml` 中 `browser` 服务的注释另外启动（默认用免费的 Chromium 无界面浏览器 `chromedp/headless-shell`；遇到 Cloudflare 等人机验证过不去时可换成注释里的 CloakBrowser，需要申请免费 key），填 `http://browser:9222`；本地开发可用 `chrome --remote-debugging-port=9222 --user-data-dir=<临时目录>` 启动后填 `http://127.0.0.1:9222`
 - `startBrowser` / `startBrowserAwait` 等打开的网页：默认下载网页在弹窗中显示；系统设置中开启“使用远程浏览器”后，在服务器的浏览器里打开并把画面实时传到弹窗中操作（同一时间只打开一个）
 - `java.toast` 在登录、按钮操作、发现页中以提示弹出；`getReadBookConfig` / `getThemeConfig` 返回默认值；`refreshBookInfo` / `refreshBookToc` / `refreshContent` 暂不自动刷新页面
 - rar / 7z 解压不支持（zip 支持）；RSS 源暂未实现；在线朗读引擎的登录界面（loginUi）暂不支持；PDF 只显示页面图像，不能选中文字、朗读

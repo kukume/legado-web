@@ -7,6 +7,7 @@ import io.legado.web.db.dbQuery
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.inList
+import org.jetbrains.exposed.v1.core.plus
 import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.select
 import org.jetbrains.exposed.v1.jdbc.selectAll
@@ -47,10 +48,15 @@ class ReadingStatsService {
         val seconds = r.seconds.coerceIn(0, 900)
         val chars = r.chars.coerceIn(0, 500_000)
         if (seconds == 0 && chars == 0) return
-        dbQuery {
-            val where = (ReadingStats.userId eq userId) and (ReadingStats.day eq r.day) and (ReadingStats.bookId eq r.bookId)
-            val row = ReadingStats.selectAll().where { where }.firstOrNull()
-            if (row == null) {
+        val where = (ReadingStats.userId eq userId) and (ReadingStats.day eq r.day) and (ReadingStats.bookId eq r.bookId)
+        // 在数据库里直接累加（不先读出来再写回）：多个端（网页、IDE 插件）同时上报时不会互相覆盖
+        fun org.jetbrains.exposed.v1.jdbc.JdbcTransaction.add() = ReadingStats.update({ where }) {
+            it[ReadingStats.seconds] = ReadingStats.seconds + seconds.toLong()
+            it[ReadingStats.chars] = ReadingStats.chars + chars.toLong()
+        }
+        if (dbQuery { add() } > 0) return
+        try {
+            dbQuery {
                 ReadingStats.insert {
                     it[ReadingStats.userId] = userId
                     it[day] = r.day
@@ -58,12 +64,10 @@ class ReadingStatsService {
                     it[ReadingStats.seconds] = seconds.toLong()
                     it[ReadingStats.chars] = chars.toLong()
                 }
-            } else {
-                ReadingStats.update({ where }) {
-                    it[ReadingStats.seconds] = row[ReadingStats.seconds] + seconds
-                    it[ReadingStats.chars] = row[ReadingStats.chars] + chars
-                }
             }
+        } catch (e: org.jetbrains.exposed.v1.exceptions.ExposedSQLException) {
+            // 同时有另一端插入了这一行（主键冲突）：改为累加。插入失败的事务已回滚，在新事务里累加
+            dbQuery { add() }
         }
     }
 

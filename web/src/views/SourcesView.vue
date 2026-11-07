@@ -281,6 +281,8 @@ const showImport = ref(false)
 const importTab = ref('url')
 const importUrl = ref('')
 const importText = ref('')
+/** 选择的文件：内容不放进输入框（几 MB 的文本放进输入框会让页面卡死） */
+const importFile = ref<{ name: string; size: number; text: string } | null>(null)
 const importPublic = ref(false)
 const importing = ref(false)
 /** 链接导入：先下载并列出书源，勾选后再导入 */
@@ -288,7 +290,10 @@ const previewItems = ref<ImportPreviewItem[] | null>(null)
 const previewSelected = ref(new Set<number>())
 
 watch(showImport, (v) => {
-  if (!v) previewItems.value = null
+  if (!v) {
+    previewItems.value = null
+    importFile.value = null
+  }
 })
 
 function showResult(r: ImportResult) {
@@ -318,12 +323,14 @@ async function doImport() {
       if (!picked.length) return message.warning(t('请先勾选书源'))
       r = await sourceApi.importText(`[${picked.map((i) => i.json).join(',')}]`, importPublic.value)
     } else {
-      if (!importText.value.trim()) return message.warning(t('请粘贴书源 JSON'))
-      r = await sourceApi.importText(importText.value, importPublic.value)
+      const text = importFile.value?.text ?? importText.value
+      if (!text.trim()) return message.warning(t('请粘贴书源 JSON'))
+      r = await sourceApi.importText(text, importPublic.value)
     }
     showResult(r)
     showImport.value = false
     importText.value = ''
+    importFile.value = null
     await load()
   } catch (e: any) {
     message.error(e.message)
@@ -335,8 +342,12 @@ async function doImport() {
 async function onFile(opts: { file: UploadFileInfo }) {
   const f = opts.file.file
   if (!f) return
-  importText.value = await f.text()
+  importFile.value = { name: f.name, size: f.size, text: await f.text() }
   importTab.value = 'text'
+}
+
+function fileSize(n: number) {
+  return n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`
 }
 
 // ---------- 订阅 ----------
@@ -484,7 +495,12 @@ const statusOptions = [
           <n-upload :show-file-list="false" accept=".json,.txt" :custom-request="() => {}" @change="onFile">
             <n-upload-dragger style="padding: 12px">{{ t('点击或拖拽 JSON 文件到这里') }}</n-upload-dragger>
           </n-upload>
-          <n-input v-model:value="importText" type="textarea" :autosize="{ minRows: 6, maxRows: 14 }" :placeholder="t('粘贴书源 JSON')" class="mono" style="margin-top: 10px" />
+          <div v-if="importFile" class="import-file">
+            <span class="ellipsis">{{ importFile.name }}</span>
+            <span class="muted small">{{ fileSize(importFile.size) }}</span>
+            <n-button size="tiny" quaternary @click="importFile = null">{{ t('移除') }}</n-button>
+          </div>
+          <n-input v-else v-model:value="importText" type="textarea" :autosize="{ minRows: 6, maxRows: 14 }" :placeholder="t('粘贴书源 JSON')" class="mono" style="margin-top: 10px" />
         </n-tab-pane>
       </n-tabs>
       <template #footer>
@@ -564,5 +580,21 @@ const statusOptions = [
   display: flex;
   flex-direction: column;
   gap: 3px;
+}
+
+/* 导入：已选择的文件 */
+.import-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+}
+
+.import-file .ellipsis {
+  flex: 1;
+  min-width: 0;
 }
 </style>

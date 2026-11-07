@@ -248,7 +248,7 @@ function saveProgress(keepalive = false) {
       body: JSON.stringify({ index, pos, title, time: Date.now() }),
     }).catch(() => {})
   } else {
-    shelfApi.progress(bookId.value, index, pos, title, Date.now()).catch(() => {})
+    shelfApi.progress(bookId.value, index, pos, title).catch(() => {})
   }
 }
 

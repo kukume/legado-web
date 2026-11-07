@@ -26,6 +26,8 @@ import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.core.inList
+import org.jetbrains.exposed.v1.core.neq
 import org.jetbrains.exposed.v1.core.less
 import org.jetbrains.exposed.v1.core.lessEq
 import org.jetbrains.exposed.v1.core.Op
@@ -183,6 +185,9 @@ class ShelfService(
     private val bookLocks = ConcurrentHashMap<Long, Mutex>()
     private fun lock(bookId: Long) = bookLocks.getOrPut(bookId) { Mutex() }
 
+    /** 正在打开（获取详情、目录）的书：同一用户同一地址同时只打开一次，避免连点或多个页面同时打开时存成两本 */
+    private val openLocks = ConcurrentHashMap<String, Mutex>()
+
     private fun ResultRow.toDto() = BookDto(
         id = this[Books.id].value,
         bookUrl = this[Books.bookUrl],
@@ -290,6 +295,16 @@ class ShelfService(
     suspend fun open(user: UserPrincipal, req: OpenBookRequest): BookDto {
         if (req.bookUrl.isBlank()) throw BadRequestException("bookUrl 不能为空")
         sourceService.requireTrustedUrls(user, req.bookUrl, req.tocUrl, req.coverUrl)
+        val key = "${user.id}|${req.bookUrl}"
+        val m = openLocks.computeIfAbsent(key) { Mutex() }
+        try {
+            return m.withLock { openLocked(user, req) }
+        } finally {
+            if (!m.isLocked) openLocks.remove(key, m)
+        }
+    }
+
+    private suspend fun openLocked(user: UserPrincipal, req: OpenBookRequest): BookDto {
         val existing = dbQuery {
             Books.selectAll().where { (Books.userId eq user.id) and (Books.bookUrl eq req.bookUrl) }.firstOrNull()
         }
@@ -334,6 +349,12 @@ class ShelfService(
         book.lastCheckCount = 0
         val now = System.currentTimeMillis()
         val id = dbQuery {
+            // 获取目录期间别处已经保存了这本书（换源等）：不再重复保存
+            Books.selectAll().where { (Books.userId eq user.id) and (Books.bookUrl eq req.bookUrl) }.firstOrNull()?.let { row ->
+                val id = row[Books.id].value
+                if (req.inShelf && !row[Books.inShelf]) Books.update({ Books.id eq id }) { it[inShelf] = true }
+                return@dbQuery id
+            }
             val id = Books.insertAndGetId {
                 it[userId] = user.id
                 it[createdAt] = now
@@ -385,7 +406,8 @@ class ShelfService(
         return getBook(user, id)
     }
 
-    private fun writeBook(it: org.jetbrains.exposed.v1.core.statements.UpdateBuilder<*>, book: Book) {
+    /** progress：是否写入阅读进度（更新目录时不写：更新期间用户可能已经读到别的章节） */
+    private fun writeBook(it: org.jetbrains.exposed.v1.core.statements.UpdateBuilder<*>, book: Book, progress: Boolean = true) {
         it[Books.bookUrl] = book.bookUrl
         it[Books.tocUrl] = book.tocUrl
         it[Books.origin] = book.origin
@@ -401,7 +423,7 @@ class ShelfService(
         it[Books.lastCheckTime] = book.lastCheckTime
         it[Books.lastCheckCount] = book.lastCheckCount
         it[Books.totalChapterNum] = book.totalChapterNum
-        it[Books.durChapterTitle] = book.durChapterTitle
+        if (progress) it[Books.durChapterTitle] = book.durChapterTitle
         it[Books.wordCount] = book.wordCount?.take(64)
         it[Books.variable] = book.variable
     }
@@ -472,7 +494,7 @@ class ShelfService(
             }
             dbQuery {
                 Books.update({ Books.id eq bookId }) {
-                    writeBook(it, book)
+                    writeBook(it, book, progress = false)
                 }
                 saveChapters(bookId, chapters)
             }
@@ -660,6 +682,11 @@ class ShelfService(
         return Triple(source, book, chapter)
     }
 
+    private companion object {
+        /** 客户端时间与服务器相差在这个范围内的进度，视为刚刚读到的位置（见 [saveProgress]） */
+        const val LIVE_PROGRESS_MS = 5 * 60 * 1000L
+    }
+
     /** 正在获取的正文（同一章同时只向书源请求一次） */
     private val inflightContent = ConcurrentHashMap<String, CompletableDeferred<String>>()
 
@@ -753,15 +780,20 @@ class ShelfService(
      * 保存阅读进度。
      * time 为客户端记录进度的时间（离线阅读同步时传入）：比服务器上已有的进度旧则忽略，返回 false。
      */
-    suspend fun saveProgress(user: UserPrincipal, bookId: Long, index: Int, pos: Int, title: String?, time: Long? = null): Boolean {
+    /** client：发出这次进度的客户端，多端同步时不推送回它自己（见 [ProgressEvents]） */
+    suspend fun saveProgress(user: UserPrincipal, bookId: Long, index: Int, pos: Int, title: String?, time: Long? = null, client: String? = null): Boolean {
         bookRow(user, bookId)
         val now = System.currentTimeMillis()
-        // 客户端时间不能晚于服务器当前时间（避免手机时间不准导致以后的进度都被忽略）
-        val t = time?.coerceAtMost(now) ?: now
+        // 客户端时间与服务器相差不到 5 分钟：是刚刚读到的位置（不是离线期间攒下、联网后补传的旧进度），
+        // 按服务器时间记录并直接保存。否则本机时钟比服务器慢时，带本机时间的进度会被当成“更早的”而忽略，
+        // 其他端（如 IDE 插件，按服务器时间保存）存过之后，这台设备的进度就一直存不上
+        val live = time == null || kotlin.math.abs(now - time) < LIVE_PROGRESS_MS
+        // 离线补传的进度：客户端时间不能晚于服务器当前时间（避免手机时间不准导致以后的进度都被忽略）
+        val t = if (live) now else time!!.coerceAtMost(now)
         val n = dbQuery {
             Books.update({
                 (Books.id eq bookId) and (Books.userId eq user.id) and
-                    (if (time != null) Books.durChapterTime lessEq t else Op.TRUE)
+                    (if (!live) Books.durChapterTime lessEq t else Op.TRUE)
             }) {
                 it[durChapterIndex] = index
                 it[durChapterPos] = pos
@@ -770,6 +802,7 @@ class ShelfService(
                 it[lastCheckCount] = 0
             }
         }
+        if (n > 0) ProgressEvents.publish(user.id, ProgressEvent(bookId, index, pos, title, t, client))
         return n > 0
     }
 
@@ -838,7 +871,11 @@ class ShelfService(
     /**
      * 换源：用新书源的书替换当前书籍，保留阅读进度
      */
-    suspend fun changeSource(user: UserPrincipal, bookId: Long, req: OpenBookRequest): BookDto {
+    suspend fun changeSource(user: UserPrincipal, bookId: Long, req: OpenBookRequest): BookDto =
+        // 与更新目录互斥：否则更新目录可能在换源之后把旧书源的目录写回来
+        lock(bookId).withLock { changeSourceLocked(user, bookId, req) }
+
+    private suspend fun changeSourceLocked(user: UserPrincipal, bookId: Long, req: OpenBookRequest): BookDto {
         val row = bookRow(user, bookId)
         val old = row.toEngineBook()
         if (LocalBookService.isLocal(old.origin)) throw BadRequestException("本地书籍不能换源")
@@ -867,10 +904,18 @@ class ShelfService(
         )
         newBook.durChapterIndex = durIndex
         newBook.durChapterTitle = chapters.getOrNull(durIndex)?.title
-        // 同一用户可能已有这个 bookUrl 的临时记录，先删除
         dbQuery {
-            Books.deleteWhere {
-                (Books.userId eq user.id) and (Books.bookUrl eq newBook.bookUrl) and (Books.inShelf eq false)
+            val others = Books.selectAll().where {
+                (Books.userId eq user.id) and (Books.bookUrl eq newBook.bookUrl) and (Books.id neq bookId)
+            }.toList()
+            // 书架上已经有新来源的这本书：不能换成同一本，否则书架上会出现两本
+            if (others.any { it[Books.inShelf] }) throw BadRequestException("书架上已经有这个来源的这本书")
+            // 同一用户可能已有这个 bookUrl 的临时记录（打开过但没加入书架），先删除；不能删到正在换源的这本
+            val tempIds = others.map { it[Books.id].value }
+            if (tempIds.isNotEmpty()) {
+                Books.deleteWhere { Books.id inList tempIds }
+                Chapters.deleteWhere { Chapters.bookId inList tempIds }
+                ChapterContents.deleteWhere { ChapterContents.bookId inList tempIds }
             }
             Books.update({ Books.id eq bookId }) {
                 writeBook(it, newBook)

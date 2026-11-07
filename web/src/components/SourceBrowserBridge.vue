@@ -81,6 +81,14 @@ function connect() {
   const token = getToken()
   if (!token) return
   es = new EventSource(`/api/events?token=${encodeURIComponent(token)}&client=${encodeURIComponent(getClientId())}`)
+  // 其他端（其他标签页、设备、IDE 插件）的阅读进度：转发给阅读页（见 ReaderView 的多端同步）
+  es.addEventListener('progress', (e) => {
+    try {
+      window.dispatchEvent(new CustomEvent('legado:progress', { detail: JSON.parse((e as MessageEvent).data) }))
+    } catch {
+      /* ignore */
+    }
+  })
   es.addEventListener('browser', (e) => {
     try {
       onEvent(JSON.parse((e as MessageEvent).data) as BrowserEvent)

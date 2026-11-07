@@ -30,6 +30,7 @@ import org.jetbrains.exposed.v1.core.inList
 import org.jetbrains.exposed.v1.core.or
 import org.jetbrains.exposed.v1.jdbc.deleteWhere
 import org.jetbrains.exposed.v1.jdbc.insertAndGetId
+import org.jetbrains.exposed.v1.jdbc.select
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.update
 import org.jetbrains.exposed.v1.jdbc.upsert
@@ -118,7 +119,8 @@ class SourceService(
     suspend fun list(user: UserPrincipal): List<SourceSummary> = dbQuery {
         val prefs = UserSourcePrefs.selectAll().where { UserSourcePrefs.userId eq user.id }
             .associate { it[UserSourcePrefs.sourceId] to it[UserSourcePrefs.enabled] }
-        val rows = BookSources.selectAll()
+        // 列表只需要摘要，不读书源 JSON（书源多时 JSON 有几十 MB）
+        val rows = BookSources.select(BookSources.columns - BookSources.json)
             .where { visibleOp(user) }
             .orderBy(BookSources.customOrder to SortOrder.ASC, BookSources.id to SortOrder.ASC)
             .toList()
@@ -166,7 +168,10 @@ class SourceService(
         return dbQuery {
             BookSources.selectAll().where { BookSources.id inList idSet }
                 .map { StoredSource(it[BookSources.id].value, it[BookSources.ownerId], it[BookSources.isPublic], it.toSource()) }
-        }.sortedBy { idSet.indexOf(it.id) }
+        }.let { found ->
+            val order = idSet.withIndex().associate { (i, id) -> id to i }
+            found.sortedBy { order[it.id] }
+        }
     }
 
     suspend fun get(user: UserPrincipal, id: Long): StoredSource = dbQuery {

@@ -95,8 +95,8 @@ export async function request<T = any>(
     if (e?.name === 'AbortError') throw e
     throw new NetworkError()
   }
-  // 反向代理在后端不可用时返回的 502/503/504（非 JSON）也按网络不可用处理
-  if ([502, 503, 504].includes(res.status) && !res.headers.get('content-type')?.includes('json')) {
+  // 反向代理、CDN 在后端不可用时返回的 5xx 页面（非 JSON，如 502/503/504、Cloudflare 52x）也按网络不可用处理
+  if (res.status >= 500 && !res.headers.get('content-type')?.includes('json')) {
     throw new NetworkError()
   }
   if (!res.ok) throw await parseError(res)

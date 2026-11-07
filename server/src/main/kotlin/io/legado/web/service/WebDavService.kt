@@ -93,6 +93,15 @@ class WebDavService(
         }
     }
 
+    /**
+     * 记下备份结果：重新读取当前配置只改结果字段。上传可能要几十秒，期间用户改了设置（地址、密码、自动备份开关）时，
+     * 不能用备份开始时读到的旧配置把它覆盖回去；期间清除了配置时不再写回
+     */
+    private suspend fun storeResult(userId: Long, lastBackup: Long?, error: String?) {
+        val cur = load(userId) ?: return
+        store(userId, cur.copy(lastBackup = lastBackup ?: cur.lastBackup, lastError = error))
+    }
+
     private fun StoredConfig.toDto() = ConfigDto(url, account, password.isNotEmpty(), dir, deviceName, autoBackup, lastBackup, lastError)
 
     suspend fun config(user: UserPrincipal): ConfigDto = (load(user.id) ?: StoredConfig()).toDto()
@@ -158,10 +167,10 @@ class WebDavService(
             val bytes = backupService.export(user, parts)
             val name = backupName(c)
             client.upload(root + name, bytes)
-            store(user.id, c.copy(lastBackup = System.currentTimeMillis(), lastError = null))
+            storeResult(user.id, System.currentTimeMillis(), null)
             return BackupResult(name, bytes.size)
         } catch (e: Exception) {
-            store(user.id, c.copy(lastError = e.message?.take(200)))
+            storeResult(user.id, null, e.message?.take(200))
             throw e
         }
     }

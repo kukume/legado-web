@@ -47,7 +47,11 @@ export function usePagedMode(d: {
    * 打开章节（分页模式）
    * anim：翻页跨章时的滑动方向，旧页面滑出、新页面滑入，和章内翻页一致
    */
+  /** 每次打开章节加一：连续切换章节时，先发出、后返回的旧结果不能覆盖新章节 */
+  let openSeq = 0
+
   async function openPage(index: number, pos = 0, toLast = false, anim: "next" | "prev" | null = null) {
+    const seq = ++openSeq
     finishPageAnims()
     const kind = d.pageAnim.value
     const ghost = !anim || kind === "none" ? null : kind === "slide" ? snapshotPage() : snapshotFull()
@@ -58,6 +62,7 @@ export function usePagedMode(d: {
       await nextTick()
       await measurePages()
       const seg = await d.loadSegment(index)
+      if (seq !== openSeq) return
       noTransition.value = true
       pageSeg.value = seg
       d.curIndex.value = index
@@ -66,7 +71,8 @@ export function usePagedMode(d: {
       await nextTick()
       await measurePages()
       if (toLast) page.value = pageCount.value - 1
-      else page.value = Math.min(pageCount.value - 1, Math.floor((pos / 10000) * pageCount.value))
+      // 进度按 页码/总页数 保存并四舍五入，换算回来时加一点余量，避免 1/3 存成 3333 后落到前一页
+      else page.value = Math.min(pageCount.value - 1, Math.floor((pos / 10000) * pageCount.value + 0.01))
       await nextTick()
       void columns.value?.offsetWidth // 让无过渡的位置先生效
       noTransition.value = false
@@ -78,8 +84,11 @@ export function usePagedMode(d: {
       d.prefetch(index)
     } finally {
       clearTimeout(loadingTimer)
-      pageLoading.value = false
-      noTransition.value = false
+      // 被更新的打开操作取代时，加载状态交给它处理
+      if (seq === openSeq) {
+        pageLoading.value = false
+        noTransition.value = false
+      }
       if (ghost && !slid) ghost.remove()
     }
   }

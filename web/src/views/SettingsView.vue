@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { NButton, NCard, NDescriptions, NDescriptionsItem, NInput, NRadioButton, NRadioGroup, NSpace, useMessage } from 'naive-ui'
+import { NButton, NCard, NDescriptions, NDescriptionsItem, NIcon, NInput, NRadioButton, NRadioGroup, NSpace, NSwitch, useMessage } from 'naive-ui'
+import { LogoGithub } from '@vicons/ionicons5'
 import ApiKeyManager from '@/components/ApiKeyManager.vue'
 import HelpTip from '@/components/HelpTip.vue'
 import OfflineManager from '@/components/OfflineManager.vue'
 import BackupManager from '@/components/BackupManager.vue'
 import ReadingStatsCard from '@/components/ReadingStatsCard.vue'
-import { authApi } from '@/api'
+import { authApi, prefsApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { useUiStore } from '@/stores/ui'
 import { formatDate } from '@/utils/media'
@@ -20,6 +21,22 @@ const message = useMessage()
 
 const pwd = ref({ old: '', new1: '', new2: '' })
 const apiKeys = ref<InstanceType<typeof ApiKeyManager> | null>(null)
+
+// 多端阅读同步：每个用户自己的设置，默认关闭（服务器只为开启的用户推送进度）
+const progressSync = ref(false)
+const progressSyncSaving = ref(false)
+prefsApi.get<boolean>('progressSync').then((v) => (progressSync.value = v === true)).catch(() => {})
+async function setProgressSync(v: boolean) {
+  progressSyncSaving.value = true
+  try {
+    await prefsApi.set('progressSync', v)
+    progressSync.value = v
+  } catch (e: any) {
+    message.error(e.message)
+  } finally {
+    progressSyncSaving.value = false
+  }
+}
 const saving = ref(false)
 
 async function changePassword() {
@@ -80,6 +97,13 @@ function logout() {
     </n-card>
 
     <n-card size="small" class="block">
+      <template #header>{{ t('多端阅读同步') }}<help-tip>{{ t('同时在多个设备或 IDE 插件里读同一本书时，自动跟随翻章和滚动') }}</help-tip></template>
+      <template #header-extra>
+        <n-switch :value="progressSync" :loading="progressSyncSaving" @update:value="setProgressSync" />
+      </template>
+    </n-card>
+
+    <n-card size="small" class="block">
       <template #header>{{ t('离线阅读') }}<help-tip>{{ t('在书籍详情页点“离线下载”，没有网络也能阅读，进度联网后自动同步') }}</help-tip></template>
       <offline-manager />
     </n-card>
@@ -104,6 +128,10 @@ function logout() {
       </template>
       <api-key-manager ref="apiKeys" />
     </n-card>
+
+    <a class="project-link muted" href="https://github.com/kukume/legado-web" target="_blank" rel="noopener">
+      <n-icon :component="LogoGithub" />kukume/legado-web
+    </a>
   </div>
 </template>
 
@@ -133,5 +161,20 @@ function logout() {
 
 .pref-label {
   min-width: 4em;
+}
+
+/* 页面底部的项目地址 */
+.project-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 8px 0 24px;
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.project-link:hover {
+  color: var(--app-text);
 }
 </style>

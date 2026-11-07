@@ -21,17 +21,31 @@ services:
     networks:
       - legado-network
 
-  # 浏览器（可选）：webView:true 的书源、远程浏览器（系统设置中开启）需要。
-  # 取消下面的注释启动后，在后台“系统设置”的“浏览器调试地址”中填写 http://browser:9222。
+  # 浏览器（可选，默认不启动）：只有用到 webView:true 的书源，或在“系统设置”中开启了“使用远程浏览器”时才需要。
+  # 下面两个浏览器选一个取消注释，启动后在后台“系统设置”的“浏览器调试地址”中填写 http://browser:9222。
   # 每次打开网页都在新的浏览器上下文（相当于无痕窗口）中进行，用完销毁，不会在浏览器里留下数据。
   # 调试端口没有密码，不要映射到公网。
-  cloak:
-    image: cloakhq/cloakbrowser
-    container_name: cloak
-    command: cloakserve
-    restart: unless-stopped
-    networks:
-      - legado-network
+  #
+  # 1. Chromium 无界面浏览器（chromedp/headless-shell）：免费，不需要任何配置，一般用这个
+  # browser:
+  #   image: chromedp/headless-shell:latest
+  #   container_name: browser
+  #   # Chromium 用 /dev/shm 存放页面数据，Docker 默认只有 64MB，打开较大的网页时可能崩溃
+  #   shm_size: 512m
+  #   restart: unless-stopped
+  #   networks:
+  #     - legado-network
+  #
+  # 2. CloakBrowser：做了反检测，书源网站有 Cloudflare 等人机验证、上面的浏览器过不去时换成这个。
+  #    需要先到 https://cloakbrowser.dev 申请免费的 key，按它的文档加到下面的 environment 里
+  # browser:
+  #   image: cloakhq/cloakbrowser
+  #   container_name: browser
+  #   command: cloakserve
+  #   # environment:
+  #   restart: unless-stopped
+  #   networks:
+  #     - legado-network
 
   # postgres:
   #   image: postgres:17-alpine

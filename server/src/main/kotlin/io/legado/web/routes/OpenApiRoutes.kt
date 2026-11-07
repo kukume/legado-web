@@ -26,8 +26,19 @@ import io.legado.web.auth.user
 import io.legado.web.service.ApiKeyService
 import io.legado.web.service.BookDto
 import io.legado.web.service.ChapterDto
+import io.legado.web.service.ProgressEvents
 import io.legado.web.service.ShelfService
+import io.ktor.server.application.createRouteScopedPlugin
+import io.ktor.server.application.install
+import io.ktor.server.sse.heartbeat
+import io.ktor.server.sse.sse
+import io.ktor.sse.ServerSentEvent
+import io.ktor.util.AttributeKey
+import kotlin.time.Duration.Companion.seconds
 import java.util.Properties
+import org.jetbrains.exposed.v1.core.and
+import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.jdbc.selectAll
 
 data class CreateApiKeyRequest(val name: String = "")
 
@@ -61,6 +72,25 @@ private fun ApplicationCall.apiKey(): String? {
         if (it.startsWith("Bearer ", true)) return it.substring(7).trim()
     }
     return request.queryParameters["api_key"]?.trim()
+}
+
+/** 开放接口的事件推送（SSE）：建立连接前先校验 API Key，校验失败时返回 401（连接建立后就不能再返回状态码了） */
+private val ApiKeyUserKey = AttributeKey<UserPrincipal>("openApiUser")
+
+private class ApiKeyGuardConfig {
+    lateinit var service: ApiKeyService
+}
+
+private val ApiKeyGuard = createRouteScopedPlugin("OpenApiKeyGuard", ::ApiKeyGuardConfig) {
+    val service = pluginConfig.service
+    onCall { call ->
+        val u = service.authenticate(call.apiKey())
+        if (u == null) {
+            call.respond(HttpStatusCode.Unauthorized, ErrorResponse(io.legado.web.i18n.Messages.translate(call, "API Key 无效或已被删除")))
+        } else {
+            call.attributes.put(ApiKeyUserKey, u)
+        }
+    }
 }
 
 private fun resourceText(path: String): String =
@@ -99,7 +129,7 @@ private fun Route.openApiDocs() {
     }
 }
 
-fun Route.openApiRoutes(apiKeyService: ApiKeyService, shelfService: ShelfService) {
+fun Route.openApiRoutes(apiKeyService: ApiKeyService, shelfService: ShelfService, statsService: io.legado.web.service.ReadingStatsService) {
 
     openApiDocs()
 
@@ -161,8 +191,9 @@ fun Route.openApiRoutes(apiKeyService: ApiKeyService, shelfService: ShelfService
                     ?: throw BadRequestException("index 无效，应为 0-${chapters.size - 1} 或 current/next/prev")
             }
             val content = shelfService.content(u, id, index, q["refresh"] == "true")
-            if (q["saveProgress"] != "false") {
-                shelfService.saveProgress(u, id, index, 0, content.title)
+            // 读的就是当前章（如 index=current）时不改进度：否则会把章内位置重置到开头，其他端也会跟着跳回章节开头
+            if (q["saveProgress"] != "false" && index != book.durChapterIndex) {
+                shelfService.saveProgress(u, id, index, 0, content.title, client = call.request.headers["X-Client-Id"])
             }
             call.respond(
                 OpenChapterContent(
@@ -180,6 +211,50 @@ fun Route.openApiRoutes(apiKeyService: ApiKeyService, shelfService: ShelfService
         }
 
         /**
+         * 上报阅读时长、字数的增量：{ day（阅读者本地日期 yyyy-MM-dd）, bookId, seconds, chars }，
+         * 与网页的阅读统计合在一起（“我的 → 阅读统计”）
+         */
+        post("/stats/reading") {
+            val u = call.apiUser()
+            statsService.report(u.id, call.receive<io.legado.web.service.ReadingReport>())
+            call.respond(OkResponse())
+        }
+
+        /**
+         * 网页“阅读设置”里的排版（字号、行高、段间距、首行缩进、字间距、正文宽度等，JSON 对象；没设置过时为 {}）。
+         * 只读：IDE 插件等客户端按同样的排版显示正文
+         */
+        get("/reader-config") {
+            val u = call.apiUser()
+            val v = io.legado.web.db.dbQuery {
+                io.legado.web.db.UserPrefs.selectAll()
+                    .where { (io.legado.web.db.UserPrefs.userId eq u.id) and (io.legado.web.db.UserPrefs.key eq "readConfig") }
+                    .firstOrNull()?.get(io.legado.web.db.UserPrefs.value)
+            }
+            call.respondText(v?.takeIf { it.trimStart().startsWith("{") } ?: "{}", ContentType.Application.Json)
+        }
+
+        /**
+         * 其他端的阅读进度（SSE，事件名 progress，data 为 [io.legado.web.service.ProgressEvent] 的 JSON）。
+         * 同时在多个地方读同一本书时，用来跟随其他端翻章、滚动。
+         * 请求头 X-Client-Id（或查询参数 client）为本客户端的 id：保存进度时带上同一个 id，就不会收到自己发出的进度
+         */
+        route("/events") {
+            install(ApiKeyGuard) { service = apiKeyService }
+            sse {
+                val u = call.attributes[ApiKeyUserKey]
+                val client = (call.request.headers["X-Client-Id"] ?: call.request.queryParameters["client"])?.takeIf { it.length in 8..64 }
+                val sub = ProgressEvents.subscribe(u.id, client)
+                heartbeat { period = 25.seconds }
+                try {
+                    for (e in sub.channel) send(ServerSentEvent(data = ProgressEvents.toJson(e), event = "progress"))
+                } finally {
+                    ProgressEvents.unsubscribe(sub)
+                }
+            }
+        }
+
+        /**
          * 保存阅读进度：{ index, pos?, title? }
          * index 为章节序号；pos 为章内位置（比例 0~10000，默认 0 即章节开头）。
          * 以服务器时间记录，会覆盖其他设备更早的进度
@@ -191,7 +266,9 @@ fun Route.openApiRoutes(apiKeyService: ApiKeyService, shelfService: ShelfService
             val chapters = shelfService.chapters(u, id)
             if (req.index !in chapters.indices) throw BadRequestException("index 无效，应为 0-${chapters.size - 1}")
             val title = req.title?.takeIf { it.isNotBlank() } ?: chapters[req.index].title
-            shelfService.saveProgress(u, id, req.index, req.pos.coerceIn(0, 10000), title, System.currentTimeMillis())
+            shelfService.saveProgress(
+                u, id, req.index, req.pos.coerceIn(0, 10000), title, System.currentTimeMillis(), call.request.headers["X-Client-Id"],
+            )
             call.respond(OkResponse())
         }
     }

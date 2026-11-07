@@ -11,6 +11,9 @@ info:
     - 查询参数 `?api_key=lgd_xxx`
 
     点击右侧 **Authorize** 填入密钥后即可在本页直接调用。
+
+    多端同步：客户端可以带请求头 `X-Client-Id`（8~64 个字符，每个客户端实例固定一个），
+    保存进度时带上它，订阅 `/events` 时用同一个 id，就只会收到其他端的进度，不会收到自己的。
 servers:
   - url: /openapi/v1
 security:
@@ -57,6 +60,7 @@ paths:
       description: |
         `index` 为 `next` / `prev` 时相对当前阅读进度计算，并自动跳过卷名。
         默认会把返回的章节记为阅读进度，所以连续请求 `index=next` 就能一章章往后读。
+        读的就是当前进度所在的章节时不改进度（不会把章内位置重置到开头）。
       operationId: getContent
       parameters:
         - $ref: "#/components/parameters/BookId"
@@ -122,6 +126,74 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /stats/reading:
+    post:
+      tags: [阅读]
+      summary: 上报阅读时长、字数
+      description: |
+        上报一小段时间内的增量，与网页的阅读统计合在一起。`day` 为阅读者本地日期，
+        `seconds` 每次最多计 900 秒，`chars` 为这段时间读完的章节字数。
+      operationId: reportReading
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [day, bookId]
+              properties:
+                day: { type: string, example: "2026-11-07" }
+                bookId: { type: integer, format: int64 }
+                seconds: { type: integer, default: 0 }
+                chars: { type: integer, default: 0 }
+      responses:
+        "200":
+          description: 已记录
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /reader-config:
+    get:
+      tags: [阅读]
+      summary: 网页阅读设置里的排版
+      description: |
+        字号（fontSize，px）、行高（lineHeight，倍数）、段间距（paragraphSpacing，em）、字间距（letterSpacing，em）、
+        正文宽度（width，px）、首行缩进（indent）、字重（fontWeight）等。没设置过时返回 `{}`，各字段按需使用默认值。
+      operationId: getReaderConfig
+      responses:
+        "200":
+          description: 排版配置
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /events:
+    get:
+      tags: [阅读]
+      summary: 订阅其他端的阅读进度（SSE）
+      description: |
+        Server-Sent Events 长连接。同一账号在其他地方（网页、手机、其他插件）保存了进度时推送一条
+        `event: progress`，`data` 为单行 JSON，字段见 ProgressEvent。每 25 秒有一次心跳，断开后请自行重连。
+        请求头 `X-Client-Id`（或查询参数 `client`）为本客户端的 id，自己保存的进度不会推送回来。
+        需要用户在网页“我的”页面开启“多端阅读同步”（默认关闭），关闭时连接正常但不会收到进度。
+      operationId: events
+      parameters:
+        - name: X-Client-Id
+          in: header
+          description: 本客户端的 id（8~64 个字符）
+          schema: { type: string }
+      responses:
+        "200":
+          description: 事件流
+          content:
+            text/event-stream:
+              schema: { $ref: "#/components/schemas/ProgressEvent" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
 components:
   securitySchemes:
     ApiKeyHeader:
@@ -160,6 +232,15 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
   schemas:
+    ProgressEvent:
+      type: object
+      properties:
+        bookId: { type: integer, format: int64 }
+        index: { type: integer, description: 章节序号（从 0 开始，含卷名） }
+        pos: { type: integer, description: 章内位置（比例 0~10000：视口顶部在本章内容中的位置） }
+        title: { type: string, nullable: true }
+        time: { type: integer, format: int64, description: 保存时间（毫秒） }
+        client: { type: string, nullable: true, description: 发出这条进度的客户端 id }
     Error:
       type: object
       properties:

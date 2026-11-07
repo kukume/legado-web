@@ -237,5 +237,7 @@
   "无法识别文本编码（可能不是文本文件）": "Unrecognized text encoding (this may not be a text file)",
   "失败次数过多，请 {0} 秒后再试": "Too many failed attempts. Try again in {0} seconds",
   "失败次数和锁定时长需要是不小于 0 的整数": "Failure limits and lock duration must be whole numbers of 0 or more",
-  "并发数和超时需要是大于 0 的整数": "Concurrency and timeout must be whole numbers greater than 0"
+  "并发数和超时需要是大于 0 的整数": "Concurrency and timeout must be whole numbers greater than 0",
+  "书架正在更新中": "The shelf is already updating",
+  "书架上已经有这个来源的这本书": "This book from this source is already on your shelf"
 }

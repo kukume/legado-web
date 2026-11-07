@@ -6,6 +6,8 @@ import { getToken } from '@/api/http'
 const IDLE_MS = 3 * 60 * 1000
 /** 多久上报一次 */
 const FLUSH_MS = 60 * 1000
+/** 每次上报最多计这么多秒（服务器的上限）：离线期间攒下的时间分几次上报，不会被截掉 */
+const MAX_REPORT_SECONDS = 900
 
 /** 本地日期 yyyy-MM-dd（按用户所在时区统计“今天”） */
 export function localDay(d = new Date()): string {
@@ -54,8 +56,9 @@ export function useReadingStats(opts: {
 
   function take() {
     if ((!seconds && !chars) || !book) return null
-    const r = { day: localDay(), bookId: book, seconds, chars }
-    seconds = 0
+    const s = Math.min(seconds, MAX_REPORT_SECONDS)
+    const r = { day: localDay(), bookId: book, seconds: s, chars }
+    seconds -= s
     chars = 0
     return r
   }

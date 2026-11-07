@@ -4,7 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { useRoute, useRouter } from 'vue-router'
 import { NIcon, NModal, NSpin, useMessage } from 'naive-ui'
 import { ChevronBackOutline, ChevronForwardOutline } from '@vicons/ionicons5'
-import { shelfApi } from '@/api'
+import { searchApi, shelfApi, toOpenRequest } from '@/api'
 import QuickReplaceModal from '@/components/QuickReplaceModal.vue'
 import DictModal from '@/components/DictModal.vue'
 import ReadAloudPanel from '@/components/ReadAloudPanel.vue'
@@ -23,10 +23,10 @@ import AutoReadBar from '@/components/reader/AutoReadBar.vue'
 import SelectionBar from '@/components/reader/SelectionBar.vue'
 import AddBookmarkModal from '@/components/reader/AddBookmarkModal.vue'
 import type { BookmarkDraft, Segment } from '@/components/reader/types'
-import { getToken, isNetworkError, proxyImage } from '@/api/http'
+import { getClientId, getToken, isNetworkError, proxyImage } from '@/api/http'
 import { putLocalProgress } from '@/offline/db'
 import { useOfflineStore } from '@/stores/offline'
-import type { Book, Bookmark, BookSearchHit, Chapter } from '@/api/types'
+import type { Book, Bookmark, BookSearchHit, Chapter, SearchBook } from '@/api/types'
 import { customFontId, customThemeKey, customToTheme, fontFamily, readerThemes, useReaderStore, type CustomTheme, type PageAnim } from '@/stores/reader'
 import { parseContent, type ContentImage } from '@/utils/content'
 import { useScriptEffects } from '@/utils/effects'
@@ -36,6 +36,7 @@ import { usePagedMode } from '@/composables/usePagedMode'
 import { useTextSelection } from '@/composables/useTextSelection'
 import { useWakeLock } from '@/composables/useWakeLock'
 import { loadCustomFont } from '@/utils/customFont'
+import { animateScrollTo, cancelScrollAnimation } from '@/utils/animateScroll'
 import { setPageThemeColor } from '@/utils/themeColor'
 import { useAutoRead } from '@/composables/useAutoRead'
 import { useReadingStats } from '@/composables/useReadingStats'
@@ -132,7 +133,7 @@ const cssVars = computed(() => ({
 
 // ---------------- 正文加载、段评 ----------------
 
-const { contentCache, fetchContent, prefetch } = useChapterContent(bookId, chapters)
+const { contentCache, fetchContent, prefetch, reset: resetContent } = useChapterContent(bookId, chapters)
 
 const { loadReviewSummary, reviewCount, fmtReview, reviewTarget, reviewOpen, openReview } = useReaderReviews({
   book,
@@ -166,6 +167,7 @@ async function loadSegment(index: number, refresh = false): Promise<Segment> {
     } else loadReviewSummary(index)
     return { index, title: c.title || ch?.title || '', paras }
   } catch (e: any) {
+    if (!isNetworkError(e)) autoChangeSource()
     return { index, title: ch?.title || '', paras: [], error: e.message }
   }
 }
@@ -187,6 +189,8 @@ function scheduleSave() {
 
 function saveProgress(keepalive = false) {
   if (!book.value) return
+  // 刚跟随其他端跳转：位置就是服务器上的进度，不用再存（也避免存回去后其他端又跟着跳）
+  if (!keepalive && Date.now() < remoteUntil) return
   const index = curIndex.value
   const pos = Math.round(curPos.value)
   const title = curTitle.value
@@ -194,12 +198,13 @@ function saveProgress(keepalive = false) {
     // 页面关闭时：本地记录 + keepalive 请求（离线时请求失败，下次联网再同步）
     const time = Date.now()
     putLocalProgress({ bookId: bookId.value, index, pos, title, time, dirty: true }).catch(() => {})
-    const body = JSON.stringify({ index, pos, title, time })
+    // 以服务器时间记录（见 offline.saveProgress）；本地记录仍带本机时间，请求失败时联网后再按时间同步
+    const body = JSON.stringify({ index, pos, title })
     const url = `/api/shelf/${bookId.value}/progress`
     fetch(url, {
       method: 'PUT',
       keepalive: true,
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}`, 'X-Client-Id': getClientId() },
       body,
     }).catch(() => {})
   } else {
@@ -273,14 +278,72 @@ onBeforeUnmount(() => setPageThemeColor(null))
 
 // ---------------- 通用操作 ----------------
 
-async function goChapter(index: number, pos = 0) {
+async function goChapter(index: number, pos = 0, save = true) {
   if (index < 0 || index >= chapters.value.length) return
   showToc.value = false
   menuVisible.value = false
   if (isPaged.value) await openPage(index, pos)
   else await openScroll(index, pos)
-  saveProgress()
+  if (save) saveProgress()
 }
+
+// ---------------- 多端同步 ----------------
+// 同一账号在其他地方（其他标签页、设备、IDE 插件）读同一本书时，跟着翻章、滚动。
+// 本端正在操作（最近 3 秒内有点击、滚轮、按键、触摸）、朗读或自动翻页时不跟随，免得两边互相拉扯
+
+/** 最近一次本端的用户操作 */
+let lastLocalInput = 0
+/** 跟随其他端跳转后的一小段时间内不保存进度 */
+let remoteUntil = 0
+/** 正在跟随其他端打开的章节（阅读统计不把它算作在这里读完上一章） */
+let followedChapter = -1
+const markLocalInput = (e: Event) => {
+  lastLocalInput = Date.now()
+  // 用户自己操作时停下跟随其他端的滚动动画；滚轮、触摸时也停下点击翻屏的动画（否则和用户的滚动抢）。
+  // 点击、按键本身可能就是翻屏，不停下翻屏动画：连续点击时接着上一次的终点翻
+  cancelScrollAnimation(scroller.value, e.type === "wheel" || e.type === "touchstart" ? undefined : "follow")
+  // 跟随其他端之后用户自己又操作了：照常保存（否则这几秒内的翻章不会保存）
+  remoteUntil = 0
+}
+const localInputEvents = ["pointerdown", "wheel", "keydown", "touchstart"] as const
+localInputEvents.forEach((ev) => window.addEventListener(ev, markLocalInput, { capture: true, passive: true }))
+onBeforeUnmount(() => localInputEvents.forEach((ev) => window.removeEventListener(ev, markLocalInput, { capture: true })))
+
+interface RemoteProgress { bookId: number; index: number; pos: number; time: number }
+
+function onRemoteProgress(e: Event) {
+  const p = (e as CustomEvent<RemoteProgress>).detail
+  if (!p || p.bookId !== bookId.value || loadingInit.value || !chapters.value.length) return
+  if (Date.now() - lastLocalInput < 3000 || tts.active || autoRead.running.value) return
+  if (p.index < 0 || p.index >= chapters.value.length) return
+  // 已经在这个位置附近（如刚刷新过）：不动
+  if (p.index === curIndex.value && Math.abs(p.pos - curPos.value) < 30) return
+  remoteUntil = Date.now() + 3000
+  if (saveTimer) clearTimeout(saveTimer)
+  if (p.index === curIndex.value && jumpWithinChapter(p.index, p.pos)) return
+  followedChapter = p.index
+  // 翻页模式换章：用翻页动画（往后读向左翻，往前读向右翻）；滚动模式直接打开那一章
+  if (isPaged.value) openPage(p.index, p.pos, false, p.index > curIndex.value ? "next" : "prev")
+  else goChapter(p.index, p.pos, false)
+}
+
+/** 同一章内跳到指定位置；当前章不在页面上（如滚动模式下已被移除）时返回 false，改为重新打开章节 */
+function jumpWithinChapter(index: number, pos: number): boolean {
+  if (isPaged.value) {
+    if (pageSeg.value?.index !== index || pageCount.value < 1) return false
+    page.value = Math.min(pageCount.value - 1, Math.max(0, Math.floor((pos / 10000) * pageCount.value + 0.01)))
+    curPos.value = pos
+    return true
+  }
+  const el = segRefs.get(index)
+  if (!el || !scroller.value) return false
+  // 滑动过去，看得出是跟着其他端动的
+  animateScrollTo(scroller.value, el.offsetTop + (pos / 10000) * el.offsetHeight, 450, "follow")
+  return true
+}
+
+window.addEventListener("legado:progress", onRemoteProgress)
+onBeforeUnmount(() => window.removeEventListener("legado:progress", onRemoteProgress))
 
 function nextChapter() {
   goChapter(curIndex.value + 1)
@@ -372,7 +435,7 @@ async function setProcessing(key: "reSegment" | "removeSameTitle" | "useReplaceR
   if (!book.value) return
   try {
     book.value = await shelfApi.update(book.value.id, { [key]: value })
-    contentCache.clear()
+    resetContent()
     await goChapter(curIndex.value, curPos.value)
   } catch (e: any) {
     message.error(e.message)
@@ -394,7 +457,7 @@ function openDict() {
 
 /** 添加替换规则后重新显示当前章节（服务器返回正文时应用替换规则） */
 async function onReplaceSaved() {
-  contentCache.clear()
+  resetContent()
   await goChapter(curIndex.value, curPos.value)
 }
 
@@ -770,12 +833,64 @@ function chapterChars(index: number): number {
 // 读到下一章时，上一章的字数计入阅读字数
 watch(curIndex, (n, o) => {
   if (loadingInit.value || o == null || n !== o + 1) return
+  // 跟着其他端（IDE 插件、其他设备）翻过来的章节不算在这里读的：那一端会自己统计，否则字数会算两遍
+  if (n === followedChapter) {
+    followedChapter = -1
+    return
+  }
   stats.addChars(chapterChars(o))
 })
 
+/** 已经自动换过源（每次打开只尝试一次，失败后用正文里的“换源”按钮手动换） */
+let autoChanged = false
+
+/**
+ * 书正在使用的书源被删除后，正文加载失败时自动换源：搜索同名（同作者）的书，
+ * 第一个结果出来后再等 2 秒收集更多来源，按响应时间依次尝试
+ */
+async function autoChangeSource() {
+  const b = book.value
+  if (!b || autoChanged || b.sourceId != null || b.origin === 'loc_book') return
+  autoChanged = true
+  const tip = message.loading(t('书源已被删除，正在自动换源…'), { duration: 0 })
+  const found: SearchBook[] = []
+  const ctrl = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | null = null
+  try {
+    await searchApi.search(
+      { key: b.name },
+      (e) => {
+        if (e.type !== 'books') return
+        found.push(...e.books.filter((r) => r.name === b.name && (!b.author || r.author === b.author)))
+        if (found.length && !timer) timer = setTimeout(() => ctrl.abort(), 2000)
+      },
+      ctrl.signal,
+    )
+  } catch {
+    /* 收集够了主动中止，或搜索失败 */
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+  try {
+    for (const r of found.sort((x, y) => x.respondTime - y.respondTime).slice(0, 3)) {
+      try {
+        const nb = await shelfApi.changeSource(b.id, toOpenRequest(r))
+        message.success(t('已切换到「{0}」', [r.originName]))
+        onChanged(nb)
+        return
+      } catch {
+        /* 这个来源打不开，试下一个 */
+      }
+    }
+    message.warning(t('没有找到可用的其他来源，请手动换源'))
+  } finally {
+    tip.destroy()
+  }
+}
+
 function onChanged(nb: Book) {
   book.value = nb
-  contentCache.clear()
+  resetContent()
   shelfApi.chapters(nb.id).then(async (c) => {
     chapters.value = c
     // 换源后先清掉旧的离线正文，再加载章节
@@ -816,7 +931,7 @@ function onChanged(nb: Book) {
           />
         </article>
         <div class="chapter-end muted-r">
-          <n-spin v-if="loadingMore" size="small" />
+          <n-spin v-if="loadingMore && !segments[segments.length - 1]?.loading" size="small" />
           <span v-else-if="segments.length && segments[segments.length - 1].index >= chapters.length - 1">{{ t('— 全书完 —') }}</span>
         </div>
       </div>

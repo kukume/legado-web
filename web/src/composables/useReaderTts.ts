@@ -1,4 +1,5 @@
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch, type Ref } from 'vue'
+import { animateScrollTo } from '@/utils/animateScroll'
 import { useMessage } from 'naive-ui'
 import { ttsApi } from '@/api'
 import type { Chapter, TtsEngine } from '@/api/types'
@@ -159,7 +160,7 @@ export function useReaderTts(d: ReaderTtsDeps) {
       // 长段落按已读比例估算正在读的那一行
       const y = r.top + r.height * fraction
       if (y < box.top + 60 || y > box.bottom - box.height * 0.35) {
-        s.scrollTo({ top: s.scrollTop + y - box.top - box.height * 0.25, behavior: "smooth" })
+        animateScrollTo(s, s.scrollTop + y - box.top - box.height * 0.25)
       }
       return
     }

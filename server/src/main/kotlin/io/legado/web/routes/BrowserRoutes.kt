@@ -14,6 +14,10 @@ import io.ktor.sse.ServerSentEvent
 import io.legado.web.auth.AUTH_JWT
 import io.legado.web.auth.user
 import io.legado.web.service.BrowserBridge
+import io.legado.web.service.ProgressEvents
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import io.legado.web.webview.RemoteSession
 import io.legado.app.utils.GSON
 import kotlinx.coroutines.coroutineScope
@@ -24,7 +28,8 @@ import kotlinx.coroutines.withContext
 import kotlin.time.Duration.Companion.seconds
 
 /**
- * - GET  /api/events?token=&client=   SSE：推送书源脚本打开的网页 / 验证码（client 为标签页 id）
+ * - GET  /api/events?token=&client=   SSE：推送书源脚本打开的网页 / 验证码（browser），以及其他端的阅读进度（progress）；
+ *                                     client 为标签页 id
  * - POST /api/browser/{token}   提交用户操作结果 { url, body, cancel }
  * - POST /api/browser/{token}/mode   选择打开方式 { mode: remote | page }（书源登录、变量设置中）
  * - POST /api/browser/{token}/fetch   转发网页中的请求（只能访问书源自己的网站）
@@ -35,11 +40,22 @@ fun Route.browserRoutes(bridge: BrowserBridge) {
     authenticate(AUTH_JWT) {
         sse("/api/events") {
             val uid = call.user.id
-            val ch = bridge.register(uid, call.request.queryParameters["client"]?.takeIf { it.length in 8..64 })
+            val client = call.request.queryParameters["client"]?.takeIf { it.length in 8..64 }
+            val ch = bridge.register(uid, client)
+            val progress = ProgressEvents.subscribe(uid, client)
             heartbeat { period = 25.seconds }
+            // 两种消息从两个协程发出，写入同一个连接时排队
+            val sendLock = Mutex()
             try {
-                for (msg in ch) send(ServerSentEvent(data = msg, event = "browser"))
+                coroutineScope {
+                    launch {
+                        for (e in progress.channel) sendLock.withLock { send(ServerSentEvent(data = ProgressEvents.toJson(e), event = "progress")) }
+                    }
+                    for (msg in ch) sendLock.withLock { send(ServerSentEvent(data = msg, event = "browser")) }
+                    cancel()
+                }
             } finally {
+                ProgressEvents.unsubscribe(progress)
                 bridge.unregister(uid, ch)
             }
         }

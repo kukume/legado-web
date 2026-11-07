@@ -1,5 +1,8 @@
 package io.legado.web
 
+import org.jetbrains.exposed.v1.core.and
+import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.jdbc.selectAll
 import com.google.gson.JsonSyntaxException
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -106,6 +109,14 @@ fun Application.module() {
     settingService.onChange { keys -> if (SettingService.THREAD_COUNT in keys || SettingService.USER_AGENT in keys) applyEngineSettings() }
     // 书源请求的内网防护：始终开启，只能在系统设置里放行指定的内网地址（设置有缓存，每次连接读取的开销很小）
     io.legado.web.security.NetworkGuard.configure { settingService.get(SettingService.PRIVATE_NETWORK_ALLOWLIST) }
+    // 多端阅读同步是每个用户自己的设置（“我的”页面，偏好 progressSync，默认关闭）
+    io.legado.web.service.ProgressEvents.loadUserEnabled = { uid ->
+        io.legado.web.db.dbBlocking {
+            io.legado.web.db.UserPrefs.selectAll()
+                .where { (io.legado.web.db.UserPrefs.userId eq uid) and (io.legado.web.db.UserPrefs.key eq io.legado.web.service.ProgressEvents.PREF_KEY) }
+                .firstOrNull()?.get(io.legado.web.db.UserPrefs.value)?.trim() == "true"
+        }
+    }
     val captchaService = io.legado.web.service.CaptchaService(settingService, appSettings.captchaDisabled)
     val userService = UserService(settingService)
     val jwtService = JwtService(appSettings)
@@ -258,7 +269,7 @@ fun Application.module() {
         longCallRoutes()
         sourceRoutes(sourceService, configService, searchService, subscriptionService, io.legado.web.service.SourceCheckService(sourceService, settingService))
         shelfRoutes(shelfService, replaceService, proxyService, configService, reviewService, localBookService)
-        openApiRoutes(apiKeyService, shelfService)
+        openApiRoutes(apiKeyService, shelfService, readingStatsService)
         backupRoutes(backupService, webDavService)
         mediaRoutes(audioService, ttsService, io.legado.web.service.FontService(appSettings.dataDir))
         bookmarkRoutes(bookmarkService)

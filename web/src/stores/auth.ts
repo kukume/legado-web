@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { authApi } from '@/api'
-import { getToken, NetworkError, setToken } from '@/api/http'
+import { ApiError, getToken, setToken } from '@/api/http'
 import type { Me, PublicConfig } from '@/api/types'
 import { t } from '@/i18n'
 
@@ -54,7 +54,8 @@ export const useAuthStore = defineStore('auth', () => {
       me.value = await authApi.me()
       saveCachedMe(me.value)
     } catch (e) {
-      const cached = e instanceof NetworkError ? loadCachedMe() : null
+      // 只有登录失效（401）才算没登录；服务器出错、连不上时用缓存的用户信息
+      const cached = e instanceof ApiError && e.status === 401 ? null : loadCachedMe()
       if (!cached) throw e
       me.value = cached
     }

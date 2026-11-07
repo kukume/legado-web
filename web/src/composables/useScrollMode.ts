@@ -1,6 +1,7 @@
 import { nextTick, onBeforeUnmount, ref, watch, type Ref } from 'vue'
 import type { Chapter } from '@/api/types'
 import type { Segment } from '@/components/reader/types'
+import { animateScrollBy } from '@/utils/animateScroll'
 
 /**
  * 阅读页的上下滚动模式：连续显示多章，滚到底部附近接上下一章、滚到顶部附近接上上一章，
@@ -32,11 +33,15 @@ export function useScrollMode(d: {
     else segRefs.delete(index)
   }
 
+  /** 每次打开章节加一：连续切换章节时，先发出、后返回的旧结果不能覆盖新章节 */
+  let openSeq = 0
+
   async function openScroll(index: number, pos = 0) {
-    loadFailStreak = 0
+    const seq = ++openSeq
     prevFailed = -1
     segments.value = [{ index, title: d.chapters.value[index]?.title ?? '', paras: [], loading: true }]
     const seg = await d.loadSegment(index)
+    if (seq !== openSeq) return
     segments.value = [seg]
     d.curIndex.value = index
     d.curPos.value = pos
@@ -112,30 +117,26 @@ export function useScrollMode(d: {
 
   async function appendNext() {
     const last = segments.value[segments.value.length - 1]
-    if (!last || loadingMore.value) return
+    // 最后一章还在加载（刚打开）时不接下一章，否则会同时出现两个加载中；
+    // 最后一章加载失败（书源不可用、正在自动换源等）时也不再往下接，免得出现一串失败的章节，点“重试”成功后会继续加载
+    if (!last || last.loading || last.error || loadingMore.value) return
     const next = last.index + 1
     if (next >= d.chapters.value.length) return
     loadingMore.value = true
-    let appended: Segment | null = null
     try {
       const seg = await d.loadSegment(next)
       if (segments.value[segments.value.length - 1]?.index === last.index) {
         segments.value.push(seg)
-        appended = seg
         scheduleTrim()
         d.prefetch(next)
       }
     } finally {
       loadingMore.value = false
-      if (appended) loadFailStreak = appended.error ? loadFailStreak + 1 : 0
-      // 加载完再检查一次：内容仍不满一屏（章节很短、加载失败，或加载期间切换了章节、这次的结果被丢弃）时继续加载。
-      // 否则页面滚不动，也就不会再触发滚动加载，表现为滚动条占满、滑不动。连续失败 3 次后不再自动加载
-      if (loadFailStreak < 3) nextTick(checkLoadMore)
+      // 加载完再检查一次：内容仍不满一屏（章节很短，或加载期间切换了章节、这次的结果被丢弃）时继续加载。
+      // 否则页面滚不动，也就不会再触发滚动加载，表现为滚动条占满、滑不动
+      nextTick(checkLoadMore)
     }
   }
-
-  /** 连续加载失败的章节数（书源不可用时避免一直自动请求） */
-  let loadFailStreak = 0
 
   // 滚动区域尺寸变化（刚显示出来、窗口大小 / 字号变化、转屏）时检查是否需要加载下一章：
   // 打开章节时如果滚动区域还没有高度，当时的检查会以为不需要加载
@@ -249,7 +250,7 @@ export function useScrollMode(d: {
   function scrollBy(dir: 1 | -1) {
     const s = scroller.value
     if (!s) return
-    s.scrollBy({ top: dir * (s.clientHeight - 60), behavior: 'smooth' })
+    animateScrollBy(s, dir * (s.clientHeight - 60))
   }
 
   onBeforeUnmount(() => {

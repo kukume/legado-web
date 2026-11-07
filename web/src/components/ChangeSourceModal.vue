@@ -13,7 +13,10 @@ const results = ref<SearchBook[]>([])
 const progress = ref({ done: 0, total: 0 })
 const searching = ref(false)
 const matchAuthor = ref(true)
+/** 正在切换的结果（按书源区分：多个书源可能返回同一个书籍地址） */
 const changing = ref<string | null>(null)
+const keyOf = (r: SearchBook) => `${r.sourceId}|${r.bookUrl}`
+const isCurrent = (r: SearchBook) => r.bookUrl === props.book?.bookUrl && (props.book?.sourceId == null || r.sourceId === props.book.sourceId)
 let controller: AbortController | null = null
 
 const list = computed(() => {
@@ -57,7 +60,8 @@ async function start() {
 
 async function change(r: SearchBook) {
   if (!props.book) return
-  changing.value = r.bookUrl
+  if (changing.value) return
+  changing.value = keyOf(r)
   try {
     const nb = await shelfApi.changeSource(props.book.id, toOpenRequest(r))
     message.success(t('已切换到「{0}」', [r.originName]))
@@ -97,20 +101,20 @@ async function change(r: SearchBook) {
     <div class="list">
       <div
         v-for="r in list"
-        :key="r.bookUrl"
+        :key="keyOf(r)"
         class="row"
-        :class="{ current: r.bookUrl === book?.bookUrl }"
-        @click="r.bookUrl !== book?.bookUrl && change(r)"
+        :class="{ current: isCurrent(r) }"
+        @click="!isCurrent(r) && change(r)"
       >
         <div class="row-main">
           <div class="ellipsis">
             <b>{{ r.originName }}</b>
-            <n-tag v-if="r.bookUrl === book?.bookUrl" size="tiny" type="success" :bordered="false" style="margin-left: 6px">{{ t('当前') }}</n-tag>
+            <n-tag v-if="isCurrent(r)" size="tiny" type="success" :bordered="false" style="margin-left: 6px">{{ t('当前') }}</n-tag>
           </div>
           <div class="muted ellipsis small">{{ r.latestChapterTitle || t('无最新章节') }}</div>
         </div>
         <span class="muted small">{{ r.respondTime }}ms</span>
-        <n-button v-if="r.bookUrl !== book?.bookUrl" size="tiny" :loading="changing === r.bookUrl">{{ t('切换') }}</n-button>
+        <n-button v-if="!isCurrent(r)" size="tiny" :loading="changing === keyOf(r)" :disabled="!!changing && changing !== keyOf(r)">{{ t('切换') }}</n-button>
       </div>
     </div>
   </n-modal>

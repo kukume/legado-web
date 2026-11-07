@@ -11,7 +11,10 @@ import io.legado.web.db.dbBlocking
 import io.legado.web.db.dbQuery
 import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.SortOrder
+import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.core.less
+import org.jetbrains.exposed.v1.core.or
 import org.jetbrains.exposed.v1.core.plus
 import org.jetbrains.exposed.v1.jdbc.deleteWhere
 import org.jetbrains.exposed.v1.jdbc.insertAndGetId
@@ -91,6 +94,8 @@ class UserService(private val settings: SettingService) {
         }
         if (password.length < 6) throw BadRequestException("密码至少 6 位")
         val mode = settings.get(SettingService.REGISTRATION_MODE)
+        // bcrypt 约 100ms，放在事务外（SQLite 只有一个连接，事务里算会让其他请求一起等）
+        val hash = Passwords.hash(password)
         return dbQuery {
             val isFirst = Users.selectAll().limit(1).empty()
             if (Users.selectAll().where { Users.username eq name }.any()) {
@@ -123,16 +128,20 @@ class UserService(private val settings: SettingService) {
             val now = System.currentTimeMillis()
             val id = Users.insertAndGetId {
                 it[Users.username] = name
-                it[passwordHash] = Passwords.hash(password)
+                it[passwordHash] = hash
                 it[role] = if (isFirst) "admin" else "user"
                 it[enabled] = true
                 it[invitedBy] = inviterId
                 it[createdAt] = now
             }.value
             inviteId?.let { iid ->
-                InviteCodes.update({ InviteCodes.id eq iid }) {
+                // 带条件加一：多人同时用同一个邀请码注册时不会超过可用次数（PostgreSQL 下事务之间能看到彼此的提交）
+                val n = InviteCodes.update({
+                    (InviteCodes.id eq iid) and ((InviteCodes.maxUses eq 0) or (InviteCodes.usedCount less InviteCodes.maxUses))
+                }) {
                     it[usedCount] = usedCount + 1
                 }
+                if (n == 0) throw BadRequestException("邀请码已用完")
                 InviteUsages.insertAndGetId {
                     it[InviteUsages.inviteId] = iid
                     it[userId] = id
