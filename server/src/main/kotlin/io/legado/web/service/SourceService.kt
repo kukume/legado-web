@@ -226,6 +226,9 @@ class SourceService(
     suspend fun parseAny(user: UserPrincipal, text: String): List<BookSource> {
         val trimmed = text.trim().removePrefix("﻿")
         if (trimmed.isJsonObject() || trimmed.isJsonArray()) return parseSources(trimmed)
+        // 纯 JS 书源的解析会在引擎里执行脚本（见 JsSourceConfig.extract）。脚本在服务器上运行，
+        // 只能由有“添加书源”权限的用户送进引擎（与导入时的权限一致，且在执行脚本之前检查）
+        if (!canAddSource(user)) throw ForbiddenException("管理员未开放用户添加书源")
         return try {
             listOf(runEngine(user.id, 30_000) { JsSourceConfig.extract(trimmed, coroutineContext) })
         } catch (e: Exception) {
@@ -337,8 +340,10 @@ class SourceService(
      * 保存（新建或修改）书源
      */
     suspend fun save(user: UserPrincipal, id: Long?, input: BookSource, isPublic: Boolean?): Long {
-        // 纯 JS 书源：以脚本为准重新解析配置，保留启用状态、排序等用户设置
+        // 纯 JS 书源：以脚本为准重新解析配置，保留启用状态、排序等用户设置。
+        // 解析会在引擎里执行脚本（在服务器上运行），只能由有“添加书源”权限的用户触发，且在执行脚本之前检查
         val src = if (input.isJsSource()) {
+            if (!canAddSource(user)) throw ForbiddenException("管理员未开放用户添加书源")
             val script = input.mainJs!!
             try {
                 runEngine(user.id, 30_000) { JsSourceConfig.extract(script, coroutineContext) }

@@ -190,15 +190,13 @@ class CdpWebViewProvider(
                     if (html == null || !isPage) {
                         // 内网防护：页面里的请求（包括跳转、图片、脚本、接口）目标是本机或内网地址时让它失败
                         guardScope.launch {
-                            val host = runCatching { java.net.URI(reqUrl).host }.getOrNull()
-                            val blocked = host != null && NetworkGuard.isBlockedHost(host)
-                            if (blocked) {
+                            if (NetworkGuard.browserRequestAllowed(reqUrl)) {
+                                conn.sendAsync("Fetch.continueRequest", JsonObject().apply { addProperty("requestId", requestId) }, session)
+                            } else {
                                 conn.sendAsync("Fetch.failRequest", JsonObject().apply {
                                     addProperty("requestId", requestId)
                                     addProperty("errorReason", "AccessDenied")
                                 }, session)
-                            } else {
-                                conn.sendAsync("Fetch.continueRequest", JsonObject().apply { addProperty("requestId", requestId) }, session)
                             }
                         }
                         return@listener

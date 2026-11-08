@@ -549,14 +549,13 @@ class RemoteSession internal constructor(
         }
         // 内网防护：网页里的请求目标是本机或内网地址时让它失败（解析域名不能在 CDP 消息线程里阻塞）
         scope.launch {
-            val host = runCatching { java.net.URI(reqUrl).host }.getOrNull()
-            if (host != null && NetworkGuard.isBlockedHost(host)) {
+            if (NetworkGuard.browserRequestAllowed(reqUrl)) {
+                cmdAsync("Fetch.continueRequest", JsonObject().apply { addProperty("requestId", requestId) })
+            } else {
                 cmdAsync("Fetch.failRequest", JsonObject().apply {
                     addProperty("requestId", requestId)
                     addProperty("errorReason", "AccessDenied")
                 })
-            } else {
-                cmdAsync("Fetch.continueRequest", JsonObject().apply { addProperty("requestId", requestId) })
             }
         }
     }

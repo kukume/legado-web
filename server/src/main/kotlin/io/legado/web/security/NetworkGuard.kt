@@ -147,6 +147,22 @@ object NetworkGuard {
 
     fun isBlockedHost(host: String): Boolean = runCatching { checkHost(host) }.isFailure
 
+    /**
+     * 服务器浏览器（webView 书源、远程浏览器）里一个请求是否放行。
+     * 默认拒绝：只有 http(s)/ws(s) 且目标不是内网、以及 data/blob/about 这类本地无害地址才放行；
+     * file、ftp 等其它协议一律拒绝（否则书源可借浏览器读本地文件或访问内网，这些请求不经过 socketFactory）。
+     * 会解析域名，不要在 CDP 消息线程里调用。
+     */
+    fun browserRequestAllowed(url: String): Boolean {
+        if (!enabled) return true
+        val uri = runCatching { java.net.URI(url) }.getOrNull() ?: return false
+        return when (uri.scheme?.lowercase()) {
+            "http", "https", "ws", "wss" -> uri.host?.let { !isBlockedHost(it) } ?: false
+            "data", "blob", "about", "chrome-error" -> true
+            else -> false
+        }
+    }
+
     /** 原始的主机名：InetAddress 由域名解析得到时保留着域名（toString 为 “域名/IP”），不触发反向解析 */
     private fun hostOf(addr: InetAddress): String? = addr.toString().substringBefore('/').takeIf { it.isNotEmpty() }
 

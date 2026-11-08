@@ -21,7 +21,8 @@ object JsFileHelper {
     fun resolve(path: String): File {
         val root = cacheRoot.canonicalFile
         val file = File(root, path.trimStart('/', '\\')).canonicalFile
-        if (!file.path.startsWith(root.path)) {
+        // 必须是 root 本身或 root 下的文件；用分隔符判断，避免 js/12 匹配到 js/123（跨用户目录）
+        if (file.path != root.path && !file.path.startsWith(root.path + File.separator)) {
             throw SecurityException("非法路径")
         }
         return file
@@ -51,7 +52,7 @@ object JsFileHelper {
             while (true) {
                 val entry = zis.nextEntry ?: break
                 val out = File(dest, entry.name).canonicalFile
-                if (!out.path.startsWith(destPath)) continue // zip slip
+                if (out.path != destPath && !out.path.startsWith(destPath + File.separator)) continue // zip slip
                 if (entry.isDirectory) {
                     out.mkdirs()
                 } else {
