@@ -14,6 +14,8 @@ RUN npm run build:fast
 FROM --platform=$BUILDPLATFORM gradle:9-jdk21 AS server
 WORKDIR /src
 COPY settings.gradle.kts build.gradle.kts gradle.properties ./
+# 依赖版本目录（libs.versions.toml）
+COPY gradle/libs.versions.toml ./gradle/
 COPY third_party ./third_party
 COPY server ./server
 COPY --from=web /web/dist ./server/src/main/resources/static
