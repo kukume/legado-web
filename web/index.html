@@ -11,9 +11,69 @@
     <meta name="apple-mobile-web-app-title" content="阅读" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>阅读 Web</title>
+    <script>
+      // 在加载应用代码之前按保存的主题设置深色，启动画面不会先闪一下浅色
+      try {
+        var m = JSON.parse(localStorage.getItem('legado_theme') || '"auto"')
+        var dark = m === 'dark' || (m !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+        if (dark) document.querySelector('meta[name=theme-color]').setAttribute('content', '#16140f')
+      } catch (e) {}
+    </script>
+    <style>
+      /* 启动画面：应用挂载时 Vue 会替换 #app 的内容，画面随之消失 */
+      html, body { margin: 0; background: #f6f1e7; }
+      :root[data-theme='dark'], :root[data-theme='dark'] body { background: #16140f; }
+      .boot {
+        --c: #9c6b30; --page: #fff8ec; --t: #7a6d5a; --track: rgba(156, 107, 48, 0.14);
+        position: fixed; inset: 0; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; gap: 22px;
+        font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+        animation: boot-in 0.4s ease-out 0.15s both;
+      }
+      :root[data-theme='dark'] .boot { --c: #d4a15c; --page: #2a251d; --t: #a39886; --track: rgba(212, 161, 92, 0.16); }
+      .boot-book {
+        width: 76px; height: 76px; border-radius: 20px; background: var(--c);
+        display: flex; align-items: center; justify-content: center; perspective: 220px;
+        box-shadow: 0 10px 30px -8px rgba(120, 80, 30, 0.45);
+        animation: boot-float 2.4s ease-in-out infinite;
+      }
+      .boot-pages { position: relative; width: 44px; height: 30px; display: flex; }
+      .boot-pages i {
+        flex: 1; height: 100%; background: var(--page); display: block;
+      }
+      .boot-pages i:first-child { border-radius: 4px 1px 1px 4px; margin-right: 2px; }
+      .boot-pages i:nth-child(2) { border-radius: 1px 4px 4px 1px; }
+      /* 翻动的那一页：从右半边绕书脊翻到左边 */
+      .boot-pages b {
+        position: absolute; right: 0; top: 0; width: 21px; height: 100%;
+        background: var(--page); border-radius: 1px 4px 4px 1px;
+        transform-origin: left center; animation: boot-flip 1.6s cubic-bezier(0.6, 0, 0.3, 1) infinite;
+      }
+      .boot-bar { width: 120px; height: 3px; border-radius: 3px; background: var(--track); overflow: hidden; }
+      .boot-bar::after {
+        content: ''; display: block; width: 40%; height: 100%; border-radius: 3px; background: var(--c);
+        animation: boot-slide 1.3s ease-in-out infinite;
+      }
+      .boot-text { color: var(--t); font-size: 13px; letter-spacing: 0.2em; }
+      @keyframes boot-flip {
+        0%, 12% { transform: rotateY(0); filter: brightness(1); }
+        50% { filter: brightness(0.82); }
+        88%, 100% { transform: rotateY(-180deg); filter: brightness(1); }
+      }
+      @keyframes boot-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+      @keyframes boot-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(260%); } }
+      @keyframes boot-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+    </style>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <div class="boot" role="status" aria-label="加载中">
+        <div class="boot-book"><div class="boot-pages"><i></i><i></i><b></b></div></div>
+        <div class="boot-bar"></div>
+        <div class="boot-text">加载中</div>
+      </div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
