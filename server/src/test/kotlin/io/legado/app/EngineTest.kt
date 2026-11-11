@@ -236,6 +236,31 @@ class EngineTest {
     }
 
     @Test
+    fun jsoupRequestsRespectNetworkGuard() {
+        val source = htmlSource()
+        runAsUser(1) {
+            // 未开启防护时 java.get / java.post（jsoup 发请求）可以访问本机的模拟站点
+            assertEquals("", source.evalJS("java.get('$base/echo-cookie', {}).body()").toString())
+            assertEquals(200, (source.evalJS("java.post('$base/echo-cookie', 'a=1', {}).statusCode()") as Number).toInt())
+            io.legado.web.security.NetworkGuard.configure { "" }
+            try {
+                for (js in listOf(
+                    "java.get('$base/echo-cookie', {})",
+                    "java.head('$base/echo-cookie', {})",
+                    "java.post('$base/echo-cookie', 'a=1', {})",
+                    "java.get('http://localhost:$port/echo-cookie', {})",
+                )) {
+                    val res = runCatching { source.evalJS(js) }
+                    assertTrue(res.isFailure, "应该被内网防护拦住：$js")
+                    assertTrue(generateSequence(res.exceptionOrNull()) { it.cause }.any { "内网" in (it.message ?: "") }, "$js: ${res.exceptionOrNull()}")
+                }
+            } finally {
+                io.legado.web.security.NetworkGuard.resetForTests()
+            }
+        }
+    }
+
+    @Test
     fun scriptCannotAccessProtectedClasses() {
         val source = htmlSource()
         runAsUser(1) {

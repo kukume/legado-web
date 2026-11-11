@@ -44,15 +44,16 @@ object SSLHelper {
         }
 
 
-    val unsafeSSLSocketFactory: SSLSocketFactory by lazy {
+    /** 不校验证书的 SSLContext（jsoup 的 sslContext 用） */
+    val unsafeSSLContext: SSLContext by lazy {
         try {
-            val sslContext = SSLContext.getInstance("SSL")
-            sslContext.init(null, arrayOf(unsafeTrustManager), SecureRandom())
-            sslContext.socketFactory
+            SSLContext.getInstance("SSL").apply { init(null, arrayOf(unsafeTrustManager), SecureRandom()) }
         } catch (e: Exception) {
             throw RuntimeException(e)
         }
     }
+
+    val unsafeSSLSocketFactory: SSLSocketFactory by lazy { unsafeSSLContext.socketFactory }
 
     /**
      * 此类是用于主机名验证的基接口。 在握手期间，如果 URL 的主机名和服务器的标识主机名不匹配，

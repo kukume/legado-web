@@ -13,24 +13,24 @@
   "dependencies": {
     "@cap.js/wasm": "0.0.8",
     "@vicons/ionicons5": "^0.13.0",
-    "cap-widget": "0.1.58",
-    "hls.js": "^1.7.3",
-    "marked": "^18.1.0",
+    "cap-widget": "0.1.62",
+    "hls.js": "^1.7.4",
+    "marked": "^18.2.0",
     "naive-ui": "^2.45.3",
-    "pdfjs-dist": "^6.3.289",
-    "pinia": "^4.0.3",
-    "sortablejs": "^1.15.6",
-    "vue": "^3.5.43",
-    "vue-router": "^5.4.0"
+    "pdfjs-dist": "^6.5.438",
+    "pinia": "^4.1.0",
+    "sortablejs": "^1.15.7",
+    "vue": "^3.5.45",
+    "vue-router": "^5.5.0"
   },
   "devDependencies": {
-    "@types/node": "^26.6.5",
-    "@types/sortablejs": "^1.15.8",
+    "@types/node": "^26.6.6",
+    "@types/sortablejs": "^1.15.9",
     "@vitejs/plugin-vue": "^6.0.10",
     "opencc-js": "1.4.2",
     "typescript": "^6.0.3",
-    "vite": "^8.3.4",
+    "vite": "^8.3.8",
     "vite-plugin-pwa": "^2.0.0",
-    "vue-tsc": "^3.3.13"
+    "vue-tsc": "3.3.13"
   }
 }

@@ -544,6 +544,18 @@ interface JsExtensions : JsEncodeUtils {
     /**
      * js实现重定向拦截,网络访问get
      */
+    /**
+     * java.get / head / post 用的 jsoup 连接。jsoup 自己发请求，不经过 OkHttp 的 NetworkGuard.socketFactory，
+     * 所以连接前单独检查目标主机：这里解析出的地址会进 JVM 的 DNS 缓存（默认 30 秒），
+     * 紧接着 jsoup 连接时用的是同一个结果，借 DNS 换绑绕过检查行不通；不跟随重定向，也不会被跳到内网
+     */
+    private fun guardedJsoup(urlStr: String): Connection {
+        val host = runCatching { java.net.URL(urlStr).host }.getOrNull()
+            ?: throw java.io.IOException("无效的地址 $urlStr")
+        io.legado.web.security.NetworkGuard.checkHost(host)
+        return Jsoup.connect(urlStr).sslContext(SSLHelper.unsafeSSLContext)
+    }
+
     fun get(urlStr: String, headers: Any?): Connection.Response {
         return get(urlStr, headers, null)
     }
@@ -556,8 +568,7 @@ interface JsExtensions : JsEncodeUtils {
         val rateLimiter = ConcurrentRateLimiter(getSource())
         val response = rateLimiter.withLimitBlocking {
             rhinoContextOrNull?.ensureActive()
-            Jsoup.connect(urlStr)
-                .sslSocketFactory(SSLHelper.unsafeSSLSocketFactory)
+            guardedJsoup(urlStr)
                 .timeout(timeout ?: 30000)
                 .ignoreContentType(true)
                 .followRedirects(false)
@@ -583,8 +594,7 @@ interface JsExtensions : JsEncodeUtils {
         val rateLimiter = ConcurrentRateLimiter(getSource())
         val response = rateLimiter.withLimitBlocking {
             rhinoContextOrNull?.ensureActive()
-            Jsoup.connect(urlStr)
-                .sslSocketFactory(SSLHelper.unsafeSSLSocketFactory)
+            guardedJsoup(urlStr)
                 .timeout(timeout ?: 30000)
                 .ignoreContentType(true)
                 .followRedirects(false)
@@ -610,8 +620,7 @@ interface JsExtensions : JsEncodeUtils {
         val rateLimiter = ConcurrentRateLimiter(getSource())
         val response = rateLimiter.withLimitBlocking {
             rhinoContextOrNull?.ensureActive()
-            Jsoup.connect(urlStr)
-                .sslSocketFactory(SSLHelper.unsafeSSLSocketFactory)
+            guardedJsoup(urlStr)
                 .timeout(timeout ?: 30000)
                 .ignoreContentType(true)
                 .followRedirects(false)

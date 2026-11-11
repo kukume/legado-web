@@ -1,6 +1,6 @@
 plugins {
-    kotlin("jvm")
-    id("io.ktor.plugin")
+    alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.ktor)
     application
 }
 
@@ -15,52 +15,31 @@ kotlin {
     jvmToolchain(21)
 }
 
-val ktorVersion = "3.6.0"
-val exposedVersion = "1.5.1"
-
 dependencies {
-    // Ktor
-    implementation("io.ktor:ktor-server-core:$ktorVersion")
-    implementation("io.ktor:ktor-server-netty:$ktorVersion")
-    implementation("io.ktor:ktor-server-content-negotiation:$ktorVersion")
-    implementation("io.ktor:ktor-serialization-gson:$ktorVersion")
-    implementation("io.ktor:ktor-server-auth:$ktorVersion")
-    implementation("io.ktor:ktor-server-auth-jwt:$ktorVersion")
-    implementation("io.ktor:ktor-server-status-pages:$ktorVersion")
-    implementation("io.ktor:ktor-server-call-logging:$ktorVersion")
-    implementation("io.ktor:ktor-server-cors:$ktorVersion")
-    implementation("io.ktor:ktor-server-compression:$ktorVersion")
-    implementation("io.ktor:ktor-server-sse:$ktorVersion")
-    implementation("io.ktor:ktor-server-websockets:$ktorVersion")
-    implementation("io.ktor:ktor-server-config-yaml:$ktorVersion")
-    // 开放接口文档（Swagger UI 静态资源，离线可用）
-    implementation("org.webjars:swagger-ui:5.33.1")
+    implementation(libs.bundles.ktor.server)
+    implementation(libs.swagger.ui)
 
-    // Database
-    implementation("org.jetbrains.exposed:exposed-core:$exposedVersion")
-    implementation("org.jetbrains.exposed:exposed-jdbc:$exposedVersion")
-    implementation("com.zaxxer:HikariCP:7.1.0")
-    implementation("org.xerial:sqlite-jdbc:3.53.4.0")
-    implementation("org.postgresql:postgresql:42.7.14")
-    implementation("at.favre.lib:bcrypt:0.10.2")
+    // 数据库
+    implementation(libs.bundles.database)
+    implementation(libs.bcrypt)
 
-    // Book source engine (ported from Legado)
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
-    implementation("org.htmlunit:htmlunit-core-js:5.3.0-legado.4")
-    implementation("com.squareup.okhttp3:okhttp:5.5.0")
-    implementation("org.jsoup:jsoup:1.23.2")
-    implementation("cn.wanghaomiao:JsoupXpath:2.5.5")
-    implementation("com.jayway.jsonpath:json-path:3.0.0")
-    implementation("com.google.code.gson:gson:2.14.0")
-    implementation("cn.hutool:hutool-crypto:5.8.48")
-    implementation("org.apache.commons:commons-text:1.15.0")
-    implementation("org.brotli:dec:0.1.2")
-    implementation("com.github.liuyueyi.quick-chinese-transfer:quick-transfer-core:0.2.17")
+    // 书源引擎（移植自阅读）
+    implementation(libs.kotlinx.coroutines.core)
+    implementation(libs.htmlunit.core.js)
+    implementation(libs.okhttp)
+    implementation(libs.jsoup)
+    implementation(libs.jsoupxpath)
+    implementation(libs.json.path)
+    implementation(libs.gson)
+    implementation(libs.hutool.crypto)
+    implementation(libs.commons.text)
+    implementation(libs.brotli.dec)
+    implementation(libs.quick.transfer.core)
 
-    implementation("ch.qos.logback:logback-classic:1.6.5")
+    implementation(libs.logback.classic)
 
     testImplementation(kotlin("test"))
-    testImplementation("io.ktor:ktor-server-test-host:$ktorVersion")
+    testImplementation(libs.ktor.server.test.host)
 }
 
 tasks.test {
