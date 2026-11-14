@@ -7,7 +7,7 @@ import type { Book, BookGroup, LocalBookInfo } from '@/api/types'
 import { t } from '@/i18n'
 import { inspectPdf, isPdfFile } from '@/utils/pdf'
 
-const EXTS = ['epub', 'txt', 'mobi', 'azw3', 'azw', 'umd', 'pdf']
+const EXTS = ['epub', 'txt', 'mobi', 'azw3', 'azw', 'umd', 'pdf', 'zip']
 
 const props = defineProps<{ show: boolean; groups: BookGroup[]; info: LocalBookInfo | null; defaultGroup?: number }>()
 const emit = defineEmits<{ 'update:show': [boolean]; uploaded: [Book]; refreshInfo: [] }>()
@@ -21,6 +21,9 @@ interface Item {
   progress: number
   error?: string
   book?: Book
+  /** zip 压缩包：解压后导入的书和跳过的文件 */
+  books?: Book[]
+  skipped?: { name: string; reason: string }[]
 }
 
 const items = ref<Item[]>([])
@@ -49,7 +52,8 @@ function addFiles(files: FileList | File[]) {
   for (const f of Array.from(files)) {
     const ext = f.name.split('.').pop()?.toLowerCase()
     const item: Item = { file: f, status: 'wait', progress: 0 }
-    if (!ext || !EXTS.includes(ext)) Object.assign(item, { status: 'error', error: t('只支持 EPUB、TXT、MOBI、AZW3、AZW、UMD、PDF') })
+    if (ext === 'rar' || ext === '7z') Object.assign(item, { status: 'error', error: t('暂不支持 RAR、7z 压缩包，请改用 zip，或解压后上传') })
+    else if (!ext || !EXTS.includes(ext)) Object.assign(item, { status: 'error', error: t('只支持 EPUB、TXT、MOBI、AZW3、AZW、UMD、PDF 和 zip 压缩包') })
     else if (f.size > max) Object.assign(item, { status: 'error', error: t('超过 {0}MB', [props.info?.maxMb]) })
     else if (f.size === 0) Object.assign(item, { status: 'error', error: t('文件是空的') })
     items.value.push(item)
@@ -76,7 +80,16 @@ async function run() {
             item.reading = false
           }
         }
-        item.book = await shelfApi.uploadLocal(item.file, groupId.value, (p) => (item.progress = p), pdf?.pages)
+        const res = await shelfApi.uploadLocal(item.file, groupId.value, (p) => (item.progress = p), pdf?.pages)
+        if ('archive' in res && res.archive) {
+          // zip 压缩包：解压后导入了多本
+          item.books = res.books
+          item.skipped = res.skipped
+          item.status = 'done'
+          res.books.forEach((b) => emit('uploaded', b))
+          continue
+        }
+        item.book = res as Book
         // 封面上传失败不影响导入
         if (pdf?.cover) item.book = await shelfApi.uploadLocalCover(item.book.id, pdf.cover).catch(() => item.book!)
         item.status = 'done'
@@ -90,7 +103,7 @@ async function run() {
     running = false
     emit('refreshInfo')
   }
-  const ok = items.value.filter((i) => i.status === 'done').length
+  const ok = items.value.reduce((n, i) => n + (i.status !== 'done' ? 0 : i.books ? i.books.length : 1), 0)
   if (ok && !props.show) message.success(t('已导入 {0} 本书', [ok]))
 }
 
@@ -120,7 +133,7 @@ defineExpose({ addFiles })
     >
       <n-icon :component="CloudUploadOutline" size="40" />
       <div>{{ t('点击选择或拖入文件') }}</div>
-      <div class="muted small">{{ t('支持 EPUB、TXT、MOBI、AZW3、AZW、UMD、PDF，单个文件最大 {0}MB', [info?.maxMb ?? 50]) }}</div>
+      <div class="muted small">{{ t('支持 EPUB、TXT、MOBI、AZW3、AZW、UMD、PDF 和 zip 压缩包，单个文件最大 {0}MB', [info?.maxMb ?? 50]) }}</div>
       <input ref="fileInput" type="file" :accept="accept" multiple hidden @change="onPick" />
     </div>
     <div class="row">
@@ -150,6 +163,10 @@ defineExpose({ addFiles })
         <div v-if="it.reading" class="muted small">{{ t('正在读取 PDF…') }}</div>
         <div v-else-if="it.status === 'uploading' && it.progress >= 1" class="muted small">{{ t('正在解析目录…') }}</div>
         <div v-if="it.status === 'done' && it.book" class="muted small">{{ t('《{0}》共 {1} 章', [it.book.name, it.book.totalChapterNum]) }}</div>
+        <template v-if="it.status === 'done' && it.books">
+          <div class="muted small">{{ t('解压导入 {0} 本：{1}', [it.books.length, it.books.map((b) => `《${b.name}》`).join('')]) }}</div>
+          <div v-for="s in it.skipped" :key="s.name" class="muted small skip">{{ t('跳过 {0}：{1}', [s.name, s.reason]) }}</div>
+        </template>
         <div v-if="it.status === 'error'" class="small err">{{ it.error }}</div>
       </div>
     </div>

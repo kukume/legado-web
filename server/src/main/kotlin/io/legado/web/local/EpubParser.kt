@@ -7,6 +7,10 @@ import org.jsoup.parser.Parser
 import java.io.Closeable
 import java.io.File
 import java.net.URLDecoder
+import java.nio.ByteBuffer
+import java.nio.charset.CharacterCodingException
+import java.nio.charset.Charset
+import java.nio.charset.CodingErrorAction
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 
@@ -64,21 +68,69 @@ class EpubParser(file: File) : Closeable {
         }
 
         /**
-         * 只检查文件特征（上传时先于完整解析）：zip，且其中的 mimetype 为 application/epub+zip。
+         * 打开 zip。条目名不是 UTF-8 时（国内工具打包的 EPUB 常用 GBK 文件名，且没有标记 UTF-8）
+         * 按 UTF-8 打开会失败，改按 GBK 再试；标记了 UTF-8 的条目不受影响
+         */
+        fun openZip(file: File): ZipFile = try {
+            ZipFile(file)
+        } catch (e: Exception) {
+            try {
+                ZipFile(file, Charset.forName("GBK"))
+            } catch (_: Exception) {
+                throw e
+            }
+        }
+
+        /** zip 内的条目名统一为 “/” 分隔、去掉开头的 “/”（Windows 工具打包的 EPUB 可能用 “\”） */
+        private fun entryKey(name: String) = name.replace('\\', '/').trimStart('/')
+
+        /**
+         * 只检查文件特征（上传时先于完整解析）：zip，且是 EPUB——mimetype 为 application/epub+zip，
+         * 或者有 META-INF/container.xml、.opf 文件（与 App 一样不强制要求 mimetype：缺失、带 BOM 的都很常见）。
          * 普通 zip（.zip、.docx、.cbz 等）返回 false，由调用方提示“不是电子书”
          */
         fun looksLikeEpub(file: File): Boolean = isZip(file) && runCatching {
-            ZipFile(file).use { zip ->
-                val entry = zip.getEntry("mimetype") ?: return@use false
-                zip.getInputStream(entry).use { String(it.readNBytes(64), Charsets.US_ASCII).trim() } == "application/epub+zip"
+            openZip(file).use { zip ->
+                val mime = zip.getEntry("mimetype")?.let { e -> zip.getInputStream(e).use { String(it.readNBytes(64), Charsets.UTF_8) } }
+                    ?.removePrefix("﻿")?.trim()
+                if (mime.equals("application/epub+zip", ignoreCase = true)) return@use true
+                zip.entries().asSequence().map { entryKey(it.name) }
+                    .any { it.equals("META-INF/container.xml", ignoreCase = true) || it.endsWith(".opf", ignoreCase = true) }
             }
         }.getOrDefault(false)
+
+        private val DECLARED_CHARSET = Regex("""(?i)(?:encoding|charset)\s*=\s*["']?([\w\-]+)""")
+
+        /**
+         * 解码 EPUB 内的文本文件（OPF、NCX、XHTML）。合法的 UTF-8 一律按 UTF-8（最可靠）；
+         * 不是 UTF-8 时按 XML 声明或 meta 中声明的编码，没有声明时按 GB18030（老的中文 EPUB 常见 GBK 正文）
+         */
+        fun decodeText(bytes: ByteArray): String {
+            if (bytes.size >= 2 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xFE.toByte()) return String(bytes, 2, bytes.size - 2, Charsets.UTF_16LE)
+            if (bytes.size >= 2 && bytes[0] == 0xFE.toByte() && bytes[1] == 0xFF.toByte()) return String(bytes, 2, bytes.size - 2, Charsets.UTF_16BE)
+            val off = if (bytes.size >= 3 && bytes[0] == 0xEF.toByte() && bytes[1] == 0xBB.toByte() && bytes[2] == 0xBF.toByte()) 3 else 0
+            try {
+                return Charsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(bytes, off, bytes.size - off)).toString()
+            } catch (_: CharacterCodingException) {
+            }
+            val head = String(bytes, 0, minOf(bytes.size, 2048), Charsets.ISO_8859_1)
+            val declared = DECLARED_CHARSET.find(head)?.groupValues?.get(1)
+                ?.let { runCatching { Charset.forName(it) }.getOrNull() }
+                ?.takeIf { it != Charsets.UTF_8 }
+            return String(bytes, off, bytes.size - off, declared ?: Charset.forName("GB18030"))
+        }
+
+        /** 带协议的地址（http:、data:、file: 等）：冒号只有出现在第一个 "/" 之前、且是合法 scheme 时才算协议。
+         * 文件名里本身带 ":"（某些书城的混淆 EPUB，如 Text/:|:*.xhtml）不算 */
+        private val SCHEME_RE = Regex("^[a-zA-Z][a-zA-Z0-9+.\\-]*:")
 
         /** zip 内路径规范化：解析 . 和 ..，越界时返回 null */
         fun normalize(base: String, href: String): String? {
             val clean = runCatching { URLDecoder.decode(href.substringBefore('#').replace("+", "%2B"), "UTF-8") }
                 .getOrDefault(href.substringBefore('#'))
-            if (clean.isEmpty() || clean.contains(':') || clean.startsWith("/")) {
+            if (clean.isEmpty() || SCHEME_RE.containsMatchIn(clean) || clean.startsWith("/")) {
                 // 绝对路径或带协议的地址（http:、data: 等）不属于书内资源
                 if (clean.startsWith("/")) return normalize("", clean.trimStart('/'))
                 return null
@@ -97,16 +149,18 @@ class EpubParser(file: File) : Closeable {
     }
 
     private val zip: ZipFile = try {
-        ZipFile(file)
+        openZip(file)
     } catch (e: Exception) {
         throw LocalBookException("不是有效的 EPUB 文件（无法按 zip 读取）")
     }
 
     /** zip 内所有文件（路径 -> 条目） */
     private val entries: Map<String, ZipEntry>
+    /** 小写路径 -> 实际路径：OPF / 目录里写的路径与文件大小写不一致时按不区分大小写匹配 */
+    private lateinit var lowerKeys: Map<String, String>
 
     private lateinit var opfPath: String
-    private val manifest = HashMap<String, Pair<String, String>>() // id -> (path, media-type)
+    private val manifest = LinkedHashMap<String, Pair<String, String>>() // id -> (path, media-type)，保持 OPF 中的顺序
     private val manifestProps = HashMap<String, String>() // id -> properties
     private val spine = ArrayList<String>() // 路径
     private var opf: Document? = null
@@ -126,9 +180,9 @@ class EpubParser(file: File) : Closeable {
                     throw LocalBookException("EPUB 文件异常（压缩比过高）")
                 }
             }
-            entries = list.filter { !it.isDirectory }.associateBy { it.name.trimStart('/') }
-            val mime = entries["mimetype"]?.let { readText(it, 128).trim() }
-            if (mime != "application/epub+zip") throw LocalBookException("不是有效的 EPUB 文件（缺少 mimetype）")
+            entries = list.filter { !it.isDirectory }.associateBy { entryKey(it.name) }
+            lowerKeys = entries.keys.groupBy { it.lowercase() }.mapValues { it.value.first() }
+            // 与 App 一样不强制要求 mimetype（缺失、带 BOM、内容不标准的都很常见），能找到 OPF 就按 EPUB 解析
             parsePackage()
         } catch (e: Exception) {
             zip.close()
@@ -155,9 +209,12 @@ class EpubParser(file: File) : Closeable {
             out.toByteArray()
         }
 
-    private fun readText(entry: ZipEntry, limit: Long = MAX_ENTRY_SIZE): String = String(readBytes(entry, limit), Charsets.UTF_8)
+    private fun readText(entry: ZipEntry, limit: Long = MAX_ENTRY_SIZE): String = decodeText(readBytes(entry, limit))
 
-    private fun xml(path: String): Document? = entries[path]?.let { Jsoup.parse(readText(it), "", Parser.xmlParser()) }
+    /** 书内路径对应的实际条目名：先精确匹配，再不区分大小写；不存在时为 null */
+    private fun key(path: String?): String? = path?.let { if (entries.containsKey(it)) it else lowerKeys[it.lowercase()] }
+
+    private fun xml(path: String): Document? = key(path)?.let { entries[it] }?.let { Jsoup.parse(readText(it), "", Parser.xmlParser()) }
 
     // ---------------- 包信息 ----------------
 
@@ -165,22 +222,45 @@ class EpubParser(file: File) : Closeable {
     private fun Element.childrenNamed(name: String) = getAllElements().filter { it !== this && it.local() == name }
     private fun Element.firstNamed(name: String) = getAllElements().firstOrNull { it !== this && it.local() == name }
 
+    private fun isHtml(path: String, mediaType: String) =
+        mediaType.contains("html", ignoreCase = true) || path.substringAfterLast('.').lowercase() in setOf("xhtml", "html", "htm")
+
     private fun parsePackage() {
-        val container = xml("META-INF/container.xml") ?: throw LocalBookException("不是有效的 EPUB 文件（缺少 container.xml）")
-        val rootfile = container.getAllElements().firstOrNull { it.local() == "rootfile" }?.attr("full-path")
-            ?.let { normalize("", it) }
+        // OPF：按 container.xml 的 full-path；container.xml 缺失或指向不存在的文件时，在 zip 里找 .opf
+        // （App 在缺少 container.xml 时默认 OEBPS/content.opf，这里更进一步）
+        val fromContainer = xml("META-INF/container.xml")?.getAllElements()
+            ?.firstOrNull { it.local() == "rootfile" }?.attr("full-path")
+            ?.let { normalize("", it) }?.let { key(it) }
+        val rootfile = fromContainer
+            ?: entries.keys.filter { it.endsWith(".opf", ignoreCase = true) }
+                .sortedWith(compareBy({ !it.substringAfterLast('/').equals("content.opf", true) }, { it.count { c -> c == '/' } }, { it }))
+                .firstOrNull()
             ?: throw LocalBookException("EPUB 格式错误（找不到 OPF）")
         opfPath = rootfile
         val doc = xml(rootfile) ?: throw LocalBookException("EPUB 格式错误（OPF 不存在）")
         opf = doc
         doc.getAllElements().filter { it.local() == "item" }.forEach { item ->
             val id = item.attr("id")
-            val path = normalize(opfPath, item.attr("href")) ?: return@forEach
-            manifest[id] = path to item.attr("media-type")
+            val raw = normalize(opfPath, item.attr("href")) ?: return@forEach
+            // 实际条目名（大小写不一致时按不区分大小写匹配）；文件不存在的保留原路径，阅读顺序中会跳过
+            manifest[id] = (key(raw) ?: raw) to item.attr("media-type")
             item.attr("properties").takeIf { it.isNotBlank() }?.let { manifestProps[id] = it }
         }
         doc.getAllElements().filter { it.local() == "itemref" }.forEach { ref ->
-            manifest[ref.attr("idref")]?.first?.let { spine.add(it) }
+            val idref = ref.attr("idref")
+            // 与 App（epublib 的 getByIdOrHref）相同：id 找不到时把 idref 当作路径
+            val path = manifest[idref]?.first ?: normalize(opfPath, idref)?.let { key(it) }
+            if (path != null && entries.containsKey(path) && path !in spine) spine.add(path)
+        }
+        // 没有 spine 或 spine 全部无效：按清单顺序取所有网页文件；清单也没有时按文件名排序取 zip 里所有网页
+        // （App 的 epublib 在没有 spine 时同样按网页文件生成阅读顺序）
+        if (spine.isEmpty()) {
+            manifest.filterKeys { manifestProps[it]?.split(' ')?.contains("nav") != true }.values
+                .filter { (path, type) -> isHtml(path, type) && entries.containsKey(path) }
+                .forEach { if (it.first !in spine) spine.add(it.first) }
+        }
+        if (spine.isEmpty()) {
+            entries.keys.filter { isHtml(it, "") }.sortedWith(String.CASE_INSENSITIVE_ORDER).forEach { spine.add(it) }
         }
         if (spine.isEmpty()) throw LocalBookException("EPUB 中没有正文")
     }
@@ -228,7 +308,7 @@ class EpubParser(file: File) : Closeable {
             for (li in ol.children().filter { it.tagName() == "li" }) {
                 val a = li.children().firstOrNull { it.tagName() == "a" || it.tagName() == "span" }
                 val href = a?.attr("href").orEmpty()
-                val path = if (href.isNotBlank()) normalize(navPath, href) else null
+                val path = if (href.isNotBlank()) key(normalize(navPath, href)) else null
                 val title = a?.text()?.trim().orEmpty()
                 if (path != null && title.isNotEmpty() && entries.containsKey(path)) {
                     out.add(chapterOf(RawEntry(title, path, href.substringAfter('#', "").ifEmpty { null }, depth)))
@@ -253,7 +333,7 @@ class EpubParser(file: File) : Closeable {
             for (np in parent.children().filter { it.local() == "navpoint" }) {
                 val title = np.firstNamed("navlabel")?.firstNamed("text")?.text()?.trim().orEmpty()
                 val src = np.children().firstOrNull { it.local() == "content" }?.attr("src").orEmpty()
-                val path = normalize(ncxPath, src)
+                val path = key(normalize(ncxPath, src))
                 if (path != null && title.isNotEmpty() && entries.containsKey(path)) {
                     out.add(chapterOf(RawEntry(title, path, src.substringAfter('#', "").ifEmpty { null }, depth)))
                 }
@@ -326,11 +406,11 @@ class EpubParser(file: File) : Closeable {
         // SVG 中的图片（常见于封面、插图页）
         body.select("svg").forEach { svg ->
             val href = svg.select("image").firstOrNull()?.let { it.attr("xlink:href").ifEmpty { it.attr("href") } }
-            val path = href?.let { normalize(docPath, it) }
+            val path = href?.let { key(normalize(docPath, it)) }
             if (path != null && isImage(path)) svg.replaceWith(Element("img").attr("src", imageUrl(path))) else svg.remove()
         }
         body.select("img").forEach { img ->
-            val path = normalize(docPath, img.attr("src"))
+            val path = key(normalize(docPath, img.attr("src")))
             if (path != null && isImage(path)) {
                 img.clearAttributes().attr("src", imageUrl(path))
             } else {
@@ -353,7 +433,7 @@ class EpubParser(file: File) : Closeable {
 
     /** 书内图片：只允许读取图片类型的条目；返回 (内容, Content-Type) */
     fun image(path: String): Pair<ByteArray, String>? {
-        val clean = normalize("", path) ?: return null
+        val clean = key(normalize("", path)) ?: return null
         if (!isImage(clean)) return null
         val type = IMAGE_TYPES[clean.substringAfterLast('.').lowercase()]
             ?: manifest.values.firstOrNull { it.first == clean }?.second?.takeIf { it in IMAGE_TYPES.values }

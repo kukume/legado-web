@@ -24,6 +24,7 @@ const router = createRouter({
           meta: { title: t('编辑书源') },
         },
         { path: 'rules', name: 'rules', component: () => import('@/views/RulesView.vue'), meta: { title: t('规则') } },
+        { path: 'zlibrary', name: 'zlibrary', component: () => import('@/views/ZLibraryView.vue'), meta: { title: 'Z-Library' } },
         { path: 'replace', redirect: '/rules' },
         { path: 'settings', name: 'settings', component: () => import('@/views/SettingsView.vue'), meta: { title: t('我的') } },
         { path: 'admin', name: 'admin', component: () => import('@/views/AdminView.vue'), meta: { title: t('管理'), admin: true } },
@@ -40,7 +41,18 @@ router.beforeEach(async (to) => {
   const auth = useAuthStore()
   if (to.meta.public) return true
   if (!auth.loggedIn) return { name: 'login', query: { redirect: to.fullPath } }
-  if (!auth.me) {
+  if (!auth.me && auth.restoreCachedMe()) {
+    // 打开网页时先用上次缓存的用户信息直接显示页面，不等网络；后台再向服务器确认。
+    // 登录失效时请求返回 401，由全局的 onUnauthorized 退出登录并回到登录页；
+    // 权限变了（不再是管理员）时离开管理页
+    auth.fetchMe().then(
+      () => {
+        const cur = router.currentRoute.value
+        if (cur.meta.admin && !auth.isAdmin) router.replace({ name: 'shelf' })
+      },
+      () => {},
+    )
+  } else if (!auth.me) {
     try {
       await auth.fetchMe()
     } catch (e) {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, h, onMounted, ref } from 'vue'
 import {
-  NAlert, NButton, NDataTable, NIcon, NInput, NInputNumber, NModal, NRadioButton, NRadioGroup,
+  NAlert, NButton, NDataTable, NIcon, NInput, NInputGroup, NInputNumber, NModal, NRadioButton, NRadioGroup,
   NSpace, NSwitch, NTabs, NTabPane, useDialog, useMessage, type DataTableColumns,
 } from 'naive-ui'
 import { BookOutline, CloudDownloadOutline, GlobeOutline, HomeOutline, LockClosedOutline, LogoGithub, PeopleOutline, ShieldCheckmarkOutline, SpeedometerOutline } from '@vicons/ionicons5'
@@ -25,6 +25,8 @@ const tab = ref('users')
 const users = ref<User[]>([])
 const loading = ref(false)
 const settings = ref<Record<string, string>>({})
+/** 最近一次“测试通过”或“已保存”的 Z-Library 代理值；当前输入和它不同就需要重新测试 */
+const proxyTestedValue = ref('')
 
 async function loadUsers() {
   loading.value = true
@@ -49,6 +51,8 @@ function applySettings(s: Record<string, string>) {
   settings.value = s
   savedSettings.value = JSON.stringify(s)
   secretSet.value = s.capSecret === SECRET_MASK
+  // 已保存的代理视为已测试通过
+  proxyTestedValue.value = (s.zlibProxy ?? '').trim()
 }
 
 async function loadSettings() {
@@ -217,8 +221,32 @@ async function testBrowser() {
   }
 }
 
+// Z-Library 代理：改动后必须先测试通过才能保存（空=直连，无需测试）
+const testingProxy = ref(false)
+const proxyNeedsTest = computed(() => {
+  if (settings.value.zlibEnabled !== 'true') return false
+  const p = (settings.value.zlibProxy || '').trim()
+  return !!p && p !== proxyTestedValue.value
+})
+async function testProxy() {
+  testingProxy.value = true
+  try {
+    await adminApi.testZlibProxy((settings.value.zlibProxy || '').trim())
+    proxyTestedValue.value = (settings.value.zlibProxy || '').trim()
+    message.success(t('代理可用'))
+  } catch (e: any) {
+    message.error(e.message || t('测试失败'))
+  } finally {
+    testingProxy.value = false
+  }
+}
+
 const savingSettings = ref(false)
 async function saveSettings() {
+  if (proxyNeedsTest.value) {
+    message.warning(t('请先测试代理并通过后再保存'))
+    return
+  }
   savingSettings.value = true
   try {
     applySettings(await adminApi.saveSettings(settings.value))
@@ -468,6 +496,34 @@ async function saveSettings() {
                   <div class="set-control">
                     <n-input-number :value="Number(settings.localBookQuotaMb || 100)" :min="1" size="small" class="num" @update:value="(v: number | null) => (settings.localBookQuotaMb = String(v ?? 100))" />
                   </div>
+                </div>
+              </template>
+            </div>
+          </section>
+
+          <section class="set-group">
+            <h3 class="set-group-title"><n-icon :component="CloudDownloadOutline" />Z-Library</h3>
+            <div class="set-card">
+              <div class="set-row">
+                <div class="set-text">
+                  <div class="set-label">{{ t('开启 Z-Library 搜索下载') }}</div>
+                </div>
+                <div class="set-control">
+                  <n-switch :value="settings.zlibEnabled === 'true'" @update:value="(v: boolean) => (settings.zlibEnabled = String(v))" />
+                </div>
+              </div>
+              <template v-if="settings.zlibEnabled === 'true'">
+                <div class="set-row sub stack">
+                  <div class="set-label">{{ t('站点地址') }}</div>
+                  <n-input v-model:value="settings.zlibHost" placeholder="https://z-library.biz" />
+                </div>
+                <div class="set-row sub stack">
+                  <div class="set-label">{{ t('代理') }}</div>
+                  <n-input-group>
+                    <n-input v-model:value="settings.zlibProxy" placeholder="http / socks5://[用户名:密码@]127.0.0.1:1080" />
+                    <n-button :loading="testingProxy" @click="testProxy">{{ t('测试') }}</n-button>
+                  </n-input-group>
+                  <p v-if="proxyNeedsTest" class="muted small test-hint">{{ t('代理已修改，需测试通过后才能保存') }}</p>
                 </div>
               </template>
             </div>
@@ -728,5 +784,9 @@ async function saveSettings() {
   .save-bar {
     bottom: calc(64px + env(safe-area-inset-bottom));
   }
+}
+
+.test-hint {
+  margin: 6px 0 0;
 }
 </style>

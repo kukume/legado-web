@@ -21,17 +21,24 @@
       } catch (e) {}
     </script>
     <style>
-      /* 启动画面：应用挂载时 Vue 会替换 #app 的内容，画面随之消失 */
+      /* 启动画面：盖在 #app 上面，页面准备好后由 main.ts 淡出移除（见 hideBoot） */
       html, body { margin: 0; background: #f6f1e7; }
       :root[data-theme='dark'], :root[data-theme='dark'] body { background: #16140f; }
       .boot {
         --c: #9c6b30; --page: #fff8ec; --t: #7a6d5a; --track: rgba(156, 107, 48, 0.14);
-        position: fixed; inset: 0; display: flex; flex-direction: column;
-        align-items: center; justify-content: center; gap: 22px;
+        position: fixed; inset: 0; z-index: 9999; background: #f6f1e7;
+        display: flex; align-items: center; justify-content: center;
         font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+        transition: opacity 0.2s ease;
+      }
+      /* 外层负责淡出（盖着的页面渐渐显现），内层负责延迟淡入（加载快时不出现） */
+      .boot.boot-out { opacity: 0; pointer-events: none; }
+      .boot-in {
+        display: flex; flex-direction: column; align-items: center; gap: 22px;
         animation: boot-in 0.4s ease-out 0.15s both;
       }
-      :root[data-theme='dark'] .boot { --c: #d4a15c; --page: #2a251d; --t: #a39886; --track: rgba(212, 161, 92, 0.16); }
+      .boot-now .boot-in { animation: none; }
+      :root[data-theme='dark'] .boot { background: #16140f; --c: #d4a15c; --page: #2a251d; --t: #a39886; --track: rgba(212, 161, 92, 0.16); }
       .boot-book {
         width: 76px; height: 76px; border-radius: 20px; background: var(--c);
         display: flex; align-items: center; justify-content: center; perspective: 220px;
@@ -67,13 +74,38 @@
     </style>
   </head>
   <body>
-    <div id="app">
-      <div class="boot" role="status" aria-label="加载中">
+    <div id="boot" class="boot" role="status">
+      <div class="boot-in">
         <div class="boot-book"><div class="boot-pages"><i></i><i></i><b></b></div></div>
         <div class="boot-bar"></div>
-        <div class="boot-text">加载中</div>
+        <div class="boot-text" id="boot-text">加载中</div>
       </div>
     </div>
+    <div id="app"></div>
+    <script>
+      // 启动画面的文字跟随界面语言（与 src/i18n 的判断相同）；记下真正出现（淡入开始）的时间，
+      // 页面准备好时由 main.ts 收起：还没出现就直接去掉，出现了就至少显示一会儿再淡出，不会一闪而过
+      ;(function () {
+        var boot = document.getElementById('boot')
+        var l = ''
+        try { l = localStorage.getItem('legado_locale') || '' } catch (e) {}
+        if (!l) {
+          var n = ((navigator.languages && navigator.languages[0]) || navigator.language || '').toLowerCase()
+          l = /^zh-(tw|hk|mo)|^zh-hant/.test(n) ? 'zh-TW' : n.indexOf('zh') === 0 ? 'zh-CN' : n ? 'en' : 'zh-CN'
+        }
+        var text = l === 'en' ? 'Loading' : l === 'zh-TW' ? '載入中' : '加载中'
+        document.getElementById('boot-text').textContent = text
+        boot.setAttribute('aria-label', text)
+        // iOS 从主屏幕打开：系统启动图（public/splash/）画的就是这个图标，立即显示、不淡入，直接接上启动图
+        if (navigator.standalone) {
+          boot.classList.add('boot-now')
+          window.__bootShownAt = performance.now()
+        }
+        boot.addEventListener('animationstart', function (e) {
+          if (e.animationName === 'boot-in' && window.__bootShownAt === undefined) window.__bootShownAt = performance.now()
+        })
+      })()
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

@@ -62,6 +62,14 @@ export const useAuthStore = defineStore('auth', () => {
     return me.value
   }
 
+  /** 用上次缓存的用户信息（打开网页时先显示页面）；没有缓存时返回 false */
+  function restoreCachedMe(): boolean {
+    if (!token.value) return false
+    const cached = loadCachedMe()
+    if (cached) me.value = cached
+    return !!cached
+  }
+
   function applyToken(t: string) {
     token.value = t
     setToken(t)
@@ -85,5 +93,5 @@ export const useAuthStore = defineStore('auth', () => {
     saveCachedMe(null)
   }
 
-  return { token, me, user, isAdmin, loggedIn, config, siteName, loadConfig, fetchMe, login, register, logout, applyToken }
+  return { token, me, user, isAdmin, loggedIn, config, siteName, loadConfig, fetchMe, restoreCachedMe, login, register, logout, applyToken }
 })

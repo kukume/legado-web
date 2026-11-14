@@ -98,6 +98,24 @@ const pagination = reactive({
 watch([keyword, group, status], () => {
   pagination.page = 1
 })
+// 手机上页码按钮排开会超出屏幕宽度：改用简洁分页（上一页、页码输入框 / 总页数、下一页）。
+// 简洁分页不显示“每页条数”，在后面自己放一个
+const tablePagination = computed(() =>
+  isMobile.value
+    ? {
+        ...pagination,
+        simple: true,
+        suffix: () =>
+          h(NSelect, {
+            size: 'small',
+            value: pagination.pageSize,
+            options: pageSizes.map((s) => ({ label: t('{0} / 页', [s]), value: s })),
+            style: 'width: 96px; margin-left: 8px',
+            'onUpdate:value': pagination.onUpdatePageSize,
+          }),
+      }
+    : pagination,
+)
 
 async function toggle(s: SourceSummary, v: boolean) {
   try {
@@ -444,7 +462,7 @@ const statusOptions = [
           :data="filtered"
           :row-key="(r: SourceSummary) => r.id"
           :loading="loading"
-          :pagination="pagination"
+          :pagination="tablePagination"
           size="small"
           :class="{ 'm-table': isMobile }"
           :scroll-x="isMobile ? undefined : 720"

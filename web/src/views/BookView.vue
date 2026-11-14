@@ -16,7 +16,7 @@ import ChangeSourceModal from '@/components/ChangeSourceModal.vue'
 import ChangeCoverModal from '@/components/ChangeCoverModal.vue'
 import TxtTocRuleModal from '@/components/TxtTocRuleModal.vue'
 import { groupApi, shelfApi } from '@/api'
-import type { Book, BookGroup, Chapter } from '@/api/types'
+import type { Book, BookGroup, Chapter, SearchBook } from '@/api/types'
 import { formatTime } from '@/utils/media'
 import { t } from '@/i18n'
 import { isPdfBook } from '@/utils/pdf'
@@ -276,20 +276,24 @@ async function saveEdit() {
 }
 const groupOptions = computed(() => [{ label: t('未分组'), value: 0 }, ...groups.value.map((g) => ({ label: g.name, value: g.id }))])
 
-// 换封面：点封面直接保存；在编辑书籍里选择时填到封面地址，点保存后生效
+// 换封面：选中书源里的封面后直接保存（服务器按书源 + 书籍地址取封面网址）。
+// 在编辑书籍里选择时同步到表单；“恢复书源封面”在编辑书籍里点保存后生效
 const showCover = ref(false)
 let coverTarget: 'direct' | 'edit' = 'direct'
 function openCover(target: 'direct' | 'edit') {
   coverTarget = target
   showCover.value = true
 }
-async function onCoverSelect(url: string) {
-  if (coverTarget === 'edit') {
-    editForm.value.customCoverUrl = url
+async function onCoverSelect(r: SearchBook | null) {
+  if (!r && coverTarget === 'edit') {
+    editForm.value.customCoverUrl = ''
     return
   }
   try {
-    book.value = await shelfApi.update(book.value!.id, { customCoverUrl: url })
+    book.value = r
+      ? await shelfApi.setCover(book.value!.id, r.sourceId, r.bookUrl)
+      : await shelfApi.update(book.value!.id, { customCoverUrl: '' })
+    if (coverTarget === 'edit') editForm.value.customCoverUrl = book.value.customCoverUrl || ''
     message.success(t('封面已更换'))
   } catch (e: any) {
     message.error(e.message)
@@ -424,10 +428,19 @@ function onChanged(nb: Book) {
         <n-form-item :label="t('书名')"><n-input v-model:value="editForm.name" /></n-form-item>
         <n-form-item :label="t('作者')"><n-input v-model:value="editForm.author" /></n-form-item>
         <n-form-item :label="t('分组')"><n-select v-model:value="editForm.groupId" :options="groupOptions" /></n-form-item>
-        <n-form-item :label="t('封面地址')">
+        <n-form-item :label="t('封面')">
           <div class="cover-input">
-            <n-input v-model:value="editForm.customCoverUrl" :placeholder="t('留空使用书源封面')" />
+            <book-cover
+              :url="editForm.customCoverUrl || book?.coverUrl"
+              :name="book?.name"
+              :author="book?.author"
+              :origin="book?.origin"
+              :width="48"
+            />
             <n-button @click="openCover('edit')">{{ t('换封面') }}</n-button>
+            <n-button v-if="editForm.customCoverUrl" quaternary size="small" @click="editForm.customCoverUrl = ''">
+              {{ t('恢复书源封面') }}
+            </n-button>
           </div>
         </n-form-item>
         <n-form-item :label="t('简介')"><n-input v-model:value="editForm.customIntro" type="textarea" :placeholder="t('留空使用书源简介')" /></n-form-item>
@@ -454,6 +467,7 @@ function onChanged(nb: Book) {
 
 .cover-input {
   display: flex;
+  align-items: center;
   gap: 8px;
   width: 100%;
 }

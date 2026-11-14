@@ -15,6 +15,62 @@ export interface User {
 export interface Me {
   user: User
   canAddSource: boolean
+  /** 是否开启了 Z-Library 搜索下载功能 */
+  zlibEnabled: boolean
+}
+
+/** 上传 zip 压缩包时的结果：解压后导入的书和跳过的文件 */
+export interface LocalArchiveResult {
+  archive: true
+  books: Book[]
+  skipped: { name: string; reason: string }[]
+}
+
+export interface ZlibAccount {
+  email: string
+  premium: boolean
+  premiumUntil: string
+  downloadsToday: number
+  downloadsLimit: number
+  /** 额度重置倒计时（站点原文，可能为空） */
+  downloadsReset: string
+}
+
+export interface ZlibStatus {
+  /** 管理员是否开启了功能 */
+  enabled: boolean
+  host: string
+  /** 是否已登录 Z-Library（下载需要登录） */
+  loggedIn: boolean
+  account: ZlibAccount | null
+}
+
+export interface ZlibBook {
+  id: string
+  title: string
+  author: string
+  extension: string
+  filesize: string
+  year: string
+  language: string
+  href: string
+  download: string
+  premium: boolean
+  inLibrary: boolean
+}
+
+export interface ZlibJob {
+  id: string
+  bookId: string
+  title: string
+  author: string
+  extension: string
+  status: 'queued' | 'downloading' | 'importing' | 'done' | 'error'
+  receivedBytes: number
+  totalBytes: number
+  error: string | null
+  importedBookId: number | null
+  createdAt: number
 }
 
 export interface PublicConfig {

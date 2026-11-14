@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { NButton, NCard, NDescriptions, NDescriptionsItem, NIcon, NInput, NRadioButton, NRadioGroup, NSpace, NSwitch, useMessage } from 'naive-ui'
-import { LogoGithub } from '@vicons/ionicons5'
+import { NButton, NCard, NCheckbox, NDescriptions, NDescriptionsItem, NIcon, NInput, NRadioButton, NRadioGroup, NSpace, NSwitch, useMessage } from 'naive-ui'
+import type { NavLayout } from '@/utils/nav'
+import { ChevronForward, LogoGithub } from '@vicons/ionicons5'
+import { useUpdateStore } from '@/stores/update'
+import { useNavBars } from '@/composables/useNavBars'
 import ApiKeyManager from '@/components/ApiKeyManager.vue'
 import HelpTip from '@/components/HelpTip.vue'
 import OfflineManager from '@/components/OfflineManager.vue'
@@ -16,6 +19,7 @@ import { LOCALES, locale, setLocale, t } from '@/i18n'
 
 const auth = useAuthStore()
 const ui = useUiStore()
+const updates = useUpdateStore()
 const router = useRouter()
 const message = useMessage()
 
@@ -37,6 +41,32 @@ async function setProgressSync(v: boolean) {
     progressSyncSaving.value = false
   }
 }
+// 导航栏：书架、搜索、书源、我的固定显示；Z-Library 需管理员开启；管理只在电脑侧栏（手机底栏始终隐藏）
+const { available, hiddenHere } = useNavBars()
+const navBars = computed(() => [
+  { key: 'side' as const, title: t('侧栏（电脑）'), items: available.value },
+  { key: 'bottom' as const, title: t('底栏（手机）'), items: available.value.filter((i) => !i.sideOnly) },
+])
+
+/** 导航栏里隐藏了的入口在“我的”里显示的说明 */
+const ENTRY_DESC: Record<string, string> = {
+  explore: t('浏览书源的发现页'),
+  rules: t('替换净化、字典、TXT 目录规则'),
+  zlibrary: t('搜索下载电子书'),
+  admin: t('用户、邀请码、系统设置'),
+}
+
+async function toggleNav(bar: keyof NavLayout, name: string, show: boolean) {
+  const hidden = new Set(ui.navHidden[bar])
+  if (show) hidden.delete(name)
+  else hidden.add(name)
+  try {
+    await ui.setNavHidden({ ...ui.navHidden, [bar]: [...hidden] })
+  } catch (e: any) {
+    message.error(e.message)
+  }
+}
+
 const saving = ref(false)
 
 async function changePassword() {
@@ -75,6 +105,21 @@ function logout() {
       </template>
     </n-card>
 
+    <!-- 当前设备的导航栏里没有显示的入口（手机底栏始终不显示管理；隐藏了的发现、规则等）在这里进入 -->
+    <div v-if="hiddenHere.length" class="entries block">
+      <router-link v-for="i in hiddenHere" :key="i.name" :to="{ name: i.name }" class="entry">
+        <n-icon :component="i.icon" size="20" class="entry-icon" />
+        <div class="entry-text">
+          <div class="entry-title">
+            {{ i.name === 'admin' ? t('系统管理') : i.label }}
+            <span v-if="i.name === 'admin' && updates.hasUpdate" class="entry-badge">{{ t('有新版本') }}</span>
+          </div>
+          <div class="muted small">{{ ENTRY_DESC[i.name] }}</div>
+        </div>
+        <n-icon :component="ChevronForward" size="18" class="muted" />
+      </router-link>
+    </div>
+
     <n-card :title="t('阅读统计')" size="small" class="block">
       <reading-stats-card />
     </n-card>
@@ -93,6 +138,23 @@ function logout() {
         <n-radio-group :value="locale" size="small" @update:value="setLocale">
           <n-radio-button v-for="l in LOCALES" :key="l.value" :value="l.value">{{ l.label }}</n-radio-button>
         </n-radio-group>
+      </div>
+    </n-card>
+
+    <n-card :title="t('导航栏')" size="small" class="block">
+      <div class="nav-cfg">
+        <div v-for="bar in navBars" :key="bar.key" class="nav-col">
+          <div class="pref-label">{{ bar.title }}</div>
+          <n-checkbox
+            v-for="i in bar.items"
+            :key="i.name"
+            :checked="i.fixed || !ui.navHidden[bar.key].includes(i.name)"
+            :disabled="i.fixed"
+            @update:checked="(v: boolean) => toggleNav(bar.key, i.name, v)"
+          >
+            {{ i.label }}
+          </n-checkbox>
+        </div>
       </div>
     </n-card>
 
@@ -161,6 +223,82 @@ function logout() {
 
 .pref-label {
   min-width: 4em;
+}
+
+/* 导航栏里隐藏了的入口（列表，与卡片同宽） */
+.entries {
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  background: var(--app-surface);
+  overflow: hidden;
+}
+
+.entry {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  color: var(--app-text);
+  text-decoration: none;
+}
+
+.entry + .entry {
+  border-top: 1px solid var(--app-border);
+}
+
+.entry:hover {
+  background: color-mix(in srgb, var(--app-accent) 6%, transparent);
+}
+
+.entry-icon {
+  color: var(--app-accent);
+}
+
+.entry-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.entry-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.entry-badge {
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--app-accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 18px;
+}
+
+/* 导航栏设置：侧栏、底栏两列，窄屏上下排列 */
+.nav-cfg {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.nav-col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.nav-col .pref-label {
+  margin-bottom: 2px;
+  color: var(--app-text-2);
+  font-size: 13px;
+}
+
+@media (max-width: 480px) {
+  .nav-cfg {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* 页面底部的项目地址 */

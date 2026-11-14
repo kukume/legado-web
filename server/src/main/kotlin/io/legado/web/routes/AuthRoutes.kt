@@ -40,6 +40,8 @@ data class PublicConfig(
 data class MeResponse(
     val user: UserDto,
     val canAddSource: Boolean,
+    /** 是否开启了 Z-Library 搜索下载功能（侧栏据此显示入口） */
+    val zlibEnabled: Boolean,
 )
 data class CreateInviteRequest(val count: Int = 1, val maxUses: Int = 1, val expireDays: Int? = null, val note: String? = null)
 data class UpdateInviteRequest(val disabled: Boolean = false)
@@ -107,6 +109,7 @@ fun Route.authRoutes(
                         user = u,
                         canAddSource = u.role == "admin" || u.canAddSource ||
                             settings.getBool(SettingService.ALLOW_USER_SOURCES),
+                        zlibEnabled = settings.getBool(SettingService.ZLIB_ENABLED),
                     )
                 )
             }

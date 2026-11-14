@@ -822,7 +822,10 @@ class ShelfService(
 
     suspend fun update(user: UserPrincipal, bookId: Long, u: BookUpdate): BookDto {
         val row = bookRow(user, bookId)
-        sourceService.requireTrustedUrls(user, u.customCoverUrl)
+        // 自定义封面只能在这里清空（或原样提交当前值）；设置新封面走 [setCustomCover]，由服务器从书源取网址
+        if (!u.customCoverUrl.isNullOrBlank() && u.customCoverUrl != row[Books.customCoverUrl]) {
+            throw BadRequestException("请通过换封面从书源选择封面")
+        }
         // 正文处理开关写进 readConfig（按 JSON 合并，保留 App 备份里其他的字段）
         val readConfig = if (u.reSegment == null && u.removeSameTitle == null && u.useReplaceRule == null) null else {
             val obj = row[Books.readConfig]?.let { runCatching { com.google.gson.JsonParser.parseString(it).asJsonObject }.getOrNull() }
@@ -845,6 +848,16 @@ class ShelfService(
                 readConfig?.let { v -> it[Books.readConfig] = v }
             }
         }
+        return getBook(user, bookId)
+    }
+
+    /** 书名（换封面时用来在书源里重新搜索） */
+    suspend fun bookName(user: UserPrincipal, bookId: Long): String = bookRow(user, bookId)[Books.name]
+
+    /** 设置自定义封面。[coverUrl] 必须是服务器从书源取到的网址（见 SearchService.sourceCover），不能来自前端 */
+    suspend fun setCustomCover(user: UserPrincipal, bookId: Long, coverUrl: String): BookDto {
+        bookRow(user, bookId)
+        dbQuery { Books.update({ (Books.id eq bookId) and (Books.userId eq user.id) }) { it[customCoverUrl] = coverUrl } }
         return getBook(user, bookId)
     }
 

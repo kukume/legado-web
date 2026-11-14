@@ -123,7 +123,37 @@ class SearchService(
         tocUrl = tocUrl,
         variable = variable,
         respondTime = time,
-    ).also { ScriptUrls.remember(userId, bookUrl, tocUrl, coverUrl) }
+    ).also {
+        ScriptUrls.remember(userId, bookUrl, tocUrl, coverUrl)
+        if (!coverUrl.isNullOrBlank()) rememberCover(userId, sourceId, bookUrl, coverUrl!!)
+    }
+
+    // 最近搜索结果里的封面：(用户, 书源, bookUrl) → coverUrl。换封面时按书源 + bookUrl 取回，
+    // 不接受前端传来的封面网址（否则可以填任意外部网址，让服务器去请求，暴露服务器 IP）
+    private val covers = java.util.Collections.synchronizedMap(object : LinkedHashMap<String, String>() {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?) = size > MAX_COVERS
+    })
+
+    private fun coverKey(userId: Long, sourceId: Long, bookUrl: String) = "$userId\u0000$sourceId\u0000$bookUrl"
+
+    private fun rememberCover(userId: Long, sourceId: Long, bookUrl: String, coverUrl: String) {
+        covers[coverKey(userId, sourceId, bookUrl)] = coverUrl
+    }
+
+    /**
+     * 书源 [sourceId] 里 [bookUrl] 这本书的封面网址：先查最近的搜索结果，没有（如服务器重启过）再用书名在这个书源重新搜一次。
+     * 找不到返回 null。
+     */
+    suspend fun sourceCover(user: UserPrincipal, sourceId: Long, bookUrl: String, bookName: String): String? {
+        covers[coverKey(user.id, sourceId, bookUrl)]?.let { return it }
+        if (bookName.isBlank()) return null
+        searchInSource(user, sourceId, bookName, 1)
+        return covers[coverKey(user.id, sourceId, bookUrl)]
+    }
+
+    private companion object {
+        const val MAX_COVERS = 50_000
+    }
 
     /**
      * 单书源搜索（换源 / 发现）

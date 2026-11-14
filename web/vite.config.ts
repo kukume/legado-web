@@ -4,6 +4,7 @@ import { VitePWA } from 'vite-plugin-pwa'
 import { fileURLToPath, URL } from 'node:url'
 import { cpSync, createReadStream, existsSync, statSync } from 'node:fs'
 import { join, normalize, resolve } from 'node:path'
+import { splashEntries } from './scripts/apple-splash.mjs'
 
 /**
  * PDF 阅读用到的 pdf.js 资源（中文 PDF 的字符映射表、标准字体、图像解码 wasm）：
@@ -33,6 +34,20 @@ function pdfjsAssets(): Plugin {
   }
 }
 
+/** iOS 主屏幕网页应用的启动图链接（图片由 npm run splash 生成到 public/splash/） */
+function appleSplashLinks(): Plugin {
+  return {
+    name: 'apple-splash-links',
+    transformIndexHtml() {
+      return splashEntries().map((e) => ({
+        tag: 'link',
+        attrs: { rel: 'apple-touch-startup-image', media: e.media, href: `/${e.file}` },
+        injectTo: 'head' as const,
+      }))
+    },
+  }
+}
+
 // 开发时把 /api 代理到后端（默认 18080，可用 LEGADO_API 覆盖）
 const api = process.env.LEGADO_API || 'http://127.0.0.1:18080'
 
@@ -43,6 +58,7 @@ export default defineConfig({
       template: { compilerOptions: { isCustomElement: (tag) => tag === 'cap-widget' } },
     }),
     pdfjsAssets(),
+    appleSplashLinks(),
     VitePWA({
       // 有新版本时由页面提示用户刷新，避免阅读中被强制刷新
       registerType: 'prompt',
@@ -67,7 +83,8 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,mjs,css,html,svg,png,ico,woff2}'],
         // m3u8 播放库只在听书时按需加载（离线时本来就无法播放在线音频），不预缓存
-        globIgnores: ['**/hls-*.js', 'pdfjs/**'],
+        // iOS 启动图只在添加到主屏幕时读取，不预缓存
+        globIgnores: ['**/hls-*.js', 'pdfjs/**', 'splash/**'],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         // 页面路由离线时回退到 index.html；接口和开放接口文档不走回退
         navigateFallback: '/index.html',

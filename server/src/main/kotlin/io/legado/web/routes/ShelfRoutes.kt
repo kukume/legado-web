@@ -61,8 +61,11 @@ data class TxtTocRequest(val tocUrl: String = "")
 
 data class OrderRequest(val ids: List<Long> = emptyList())
 
+data class CoverRequest(val sourceId: Long = 0, val bookUrl: String = "")
+
 fun Route.shelfRoutes(
     shelfService: ShelfService,
+    searchService: io.legado.web.service.SearchService,
     replaceService: ReplaceRuleService,
     proxyService: ProxyService,
     configService: io.legado.web.service.SourceConfigService,
@@ -110,6 +113,15 @@ fun Route.shelfRoutes(
             get("/{id}") { call.respond(shelfService.getBook(call.user, call.longParam("id"))) }
             patch("/{id}") {
                 call.respond(shelfService.update(call.user, call.longParam("id"), call.receive<ShelfService.BookUpdate>()))
+            }
+            /** 换封面：只传书源和书的地址，封面网址由服务器从书源搜索结果里取（不接受前端传来的网址） */
+            post("/{id}/cover") {
+                val id = call.longParam("id")
+                val req = call.receive<CoverRequest>()
+                if (req.bookUrl.isBlank()) throw io.legado.web.auth.BadRequestException("缺少书籍地址")
+                val cover = searchService.sourceCover(call.user, req.sourceId, req.bookUrl, shelfService.bookName(call.user, id))
+                    ?: throw io.legado.web.auth.BadRequestException("没有在书源里找到这本书的封面")
+                call.respond(shelfService.setCustomCover(call.user, id, cover))
             }
             delete("/{id}") {
                 shelfService.delete(call.user, call.longParam("id"))
@@ -160,7 +172,8 @@ fun Route.shelfRoutes(
                         }
                     }
                     val pages = call.request.queryParameters["pages"]?.toIntOrNull()
-                    call.respond(localBookService.import(u, tmp, name, io.legado.web.service.LocalBookService.ImportOptions(groupId, pdfPages = pages)))
+                    // zip 压缩包（按文件头判断）解压后逐本导入，返回 { archive: true, books, skipped }
+                    call.respond(localBookService.importUpload(u, tmp, name, io.legado.web.service.LocalBookService.ImportOptions(groupId, pdfPages = pages)))
                 } finally {
                     tmp.delete()
                 }

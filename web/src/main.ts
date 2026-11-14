@@ -16,5 +16,24 @@ async function start() {
   app.use(createPinia())
   app.use(router)
   app.mount('#app')
+  // 第一个页面（含路由守卫、页面组件）准备好后再收起启动画面，不露出中间的空白
+  await router.isReady().catch(() => {})
+  hideBoot()
 }
+
+/** 启动画面（index.html 的 #boot）显示过（淡入开始后）至少停留这么久再淡出，避免一闪而过 */
+const BOOT_MIN_VISIBLE_MS = 500
+
+function hideBoot() {
+  const el = document.getElementById('boot')
+  if (!el) return
+  const shownAt = (window as { __bootShownAt?: number }).__bootShownAt
+  const wait = shownAt === undefined ? 0 : Math.max(0, BOOT_MIN_VISIBLE_MS - (performance.now() - shownAt))
+  setTimeout(() => {
+    // 加载快时启动画面还没淡入：这时只是一层底色，淡出等于让页面渐渐显现
+    el.classList.add('boot-out')
+    setTimeout(() => el.remove(), 250)
+  }, wait)
+}
+
 start()

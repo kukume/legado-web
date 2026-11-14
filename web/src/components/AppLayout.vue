@@ -1,11 +1,9 @@
 <script setup lang="ts">
-import { computed, h, watch, type Component } from 'vue'
+import { computed, h, onMounted, watch, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NIcon, NDropdown, NButton, useNotification } from 'naive-ui'
-import {
-  LibraryOutline, SearchOutline, CompassOutline, CodeSlashOutline, PersonCircleOutline,
-  ShieldCheckmarkOutline, SwapHorizontalOutline, MoonOutline, SunnyOutline, ContrastOutline,
-} from '@vicons/ionicons5'
+import { ChevronBack, MoonOutline, SunnyOutline, ContrastOutline } from '@vicons/ionicons5'
+import { useNavBars } from '@/composables/useNavBars'
 import { useAuthStore } from '@/stores/auth'
 import { useUiStore } from '@/stores/ui'
 import { useUpdateStore, versionName } from '@/stores/update'
@@ -45,25 +43,21 @@ watch(
   { immediate: true },
 )
 
-interface NavItem {
-  name: string
-  label: string
-  icon: Component
-  mobile?: boolean
-}
+// 导航入口：按“我的 → 导航栏”的设置显示或隐藏（见 useNavBars）
+const { sideNav, bottomNav, hiddenHere } = useNavBars()
 
-const nav = computed<NavItem[]>(() => {
-  const items: NavItem[] = [
-    { name: 'shelf', label: t('书架'), icon: LibraryOutline, mobile: true },
-    { name: 'search', label: t('搜索'), icon: SearchOutline, mobile: true },
-    { name: 'explore', label: t('发现'), icon: CompassOutline, mobile: true },
-    { name: 'sources', label: t('书源'), icon: CodeSlashOutline, mobile: true },
-    { name: 'rules', label: t('规则'), icon: SwapHorizontalOutline, mobile: true },
-    { name: 'settings', label: t('我的'), icon: PersonCircleOutline, mobile: true },
-  ]
-  if (auth.isAdmin) items.push({ name: 'admin', label: t('管理'), icon: ShieldCheckmarkOutline })
-  return items
+onMounted(() => {
+  ui.loadNavLayout()
 })
+
+/** 当前页面的入口没有显示在导航栏里（从“我的”进入的）：页面顶部显示返回“我的”的按钮 */
+const showBack = computed(() => hiddenHere.value.some((i) => i.name === activeName.value))
+
+function backToSettings() {
+  // 从“我的”进来的直接后退（保留“我的”的滚动位置），否则跳转
+  if ((window.history.state as { back?: string } | null)?.back === '/settings') router.back()
+  else router.push({ name: 'settings' })
+}
 
 const activeName = computed(() => {
   const n = String(route.name ?? '')
@@ -95,7 +89,7 @@ function renderIcon(icon: Component) {
       </div>
       <nav>
         <router-link
-          v-for="item in nav"
+          v-for="item in sideNav"
           :key="item.name"
           :to="{ name: item.name }"
           class="nav-item"
@@ -115,6 +109,12 @@ function renderIcon(icon: Component) {
     </aside>
 
     <main class="main">
+      <div v-if="showBack" class="back-bar">
+        <n-button text @click="backToSettings">
+          <template #icon><n-icon :component="ChevronBack" /></template>
+          {{ t('我的') }}
+        </n-button>
+      </div>
       <router-view v-slot="{ Component }">
         <keep-alive :include="['ShelfView', 'SearchView', 'ExploreView', 'SourcesView']">
           <component :is="Component" />
@@ -124,7 +124,7 @@ function renderIcon(icon: Component) {
 
     <nav class="bottom-nav">
       <router-link
-        v-for="item in nav.filter((n) => n.mobile)"
+        v-for="item in bottomNav"
         :key="item.name"
         :to="{ name: item.name }"
         class="bottom-item"
@@ -236,6 +236,11 @@ function renderIcon(icon: Component) {
   display: none;
 }
 
+/* 从“我的”进入的页面：返回“我的” */
+.back-bar {
+  padding: 12px 16px 0;
+}
+
 @media (max-width: 767px) {
   .sidebar {
     display: none;
@@ -266,7 +271,7 @@ function renderIcon(icon: Component) {
     color: var(--app-text-2);
   }
 
-  /* 6 个入口，英文标签较长时省略 */
+  /* 入口较多（最多 7 个）、英文标签较长时省略 */
   .bottom-item span {
     max-width: 100%;
     overflow: hidden;

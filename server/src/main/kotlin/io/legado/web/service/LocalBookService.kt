@@ -100,14 +100,71 @@ class LocalBookService(
         val keepName: String? = null,
         /** PDF 的页数（服务器不解析 PDF，由浏览器用 pdf.js 读出后提交） */
         val pdfPages: Int? = null,
+        /** 跳过“本地书籍上传”总开关检查（Z-Library 下载等内部导入用），配额仍然生效 */
+        val force: Boolean = false,
     )
+
+    /** zip 压缩包导入的结果（与单本书的返回区分：archive 为 true） */
+    data class ArchiveImportResult(
+        val archive: Boolean = true,
+        val books: List<BookDto>,
+        val skipped: List<io.legado.web.local.ZipBookExtractor.Skipped>,
+    )
+
+    /**
+     * 上传入口：按文件头判断——zip 压缩包（不是 EPUB）解压后逐本导入，返回 [ArchiveImportResult]；
+     * RAR / 7z 提示不支持；其它按单本书导入，返回 [BookDto]。[upload] 为临时文件，调用方负责删除
+     */
+    suspend fun importUpload(user: UserPrincipal, upload: File, originalName: String, options: ImportOptions = ImportOptions()): Any {
+        val ext = originalName.substringAfterLast('.', "").lowercase()
+        return when {
+            io.legado.web.local.ArchiveFormat.isRar(upload) || io.legado.web.local.ArchiveFormat.is7z(upload) ->
+                throw BadRequestException("暂不支持 RAR、7z 压缩包，请改用 zip，或解压后上传")
+            // 扩展名是 .epub 的按 EPUB 报错（多半是损坏的 EPUB），其它 zip 当作压缩包
+            EpubParser.isZip(upload) && ext != "epub" && !EpubParser.looksLikeEpub(upload) -> importZip(user, upload, options)
+            else -> import(user, upload, originalName, options)
+        }
+    }
+
+    private suspend fun importZip(user: UserPrincipal, archive: File, options: ImportOptions): ArchiveImportResult =
+        withContext(Dispatchers.IO) {
+            if (!options.force && !enabled()) throw ForbiddenException("管理员已关闭本地书籍上传")
+            val workDir = java.nio.file.Files.createTempDirectory("archive-").toFile()
+            val books = ArrayList<BookDto>()
+            try {
+                val extractor = io.legado.web.local.ZipBookExtractor(
+                    archive, workDir,
+                    maxFileBytes = maxBytes(),
+                    // 解压总量不超过剩余空间（再多也存不下），最多 1GB
+                    maxTotalBytes = minOf(1024L * 1024 * 1024, (quotaBytes() - usedBytes(user.id)).coerceAtLeast(0)),
+                )
+                val skipped = try {
+                    extractor.forEachBook(
+                        block = { name, file -> books += import(user, file, name, options.copy(pdfPages = null, keepName = null)) },
+                        // 单本书的格式、空间等问题记为跳过，继续导入其它的；没有权限等问题直接报错
+                        onSkip = { e -> (e as? BadRequestException)?.message ?: (e as? LocalBookException)?.message },
+                    )
+                } catch (e: LocalBookException) {
+                    throw BadRequestException(e.message ?: "压缩包无法读取")
+                }
+                if (books.isEmpty()) {
+                    throw BadRequestException(
+                        if (skipped.isEmpty()) "压缩包里没有可导入的书籍（支持 EPUB、TXT、MOBI、AZW3、AZW、UMD）"
+                        else "压缩包里的书都没能导入：" + skipped.take(3).joinToString("；") { "${it.name}（${it.reason}）" }
+                    )
+                }
+                ArchiveImportResult(books = books, skipped = skipped)
+            } finally {
+                workDir.deleteRecursively()
+            }
+        }
 
     /**
      * 导入上传的文件：检查格式与配额，解析目录，保存文件和书籍记录。[upload] 为临时文件，调用方负责删除。
      */
     suspend fun import(user: UserPrincipal, upload: File, originalName: String, options: ImportOptions = ImportOptions()): BookDto =
         withContext(Dispatchers.IO) {
-            if (!enabled()) throw ForbiddenException("管理员已关闭本地书籍上传")
+            if (!options.force && !enabled()) throw ForbiddenException("管理员已关闭本地书籍上传")
             val size = upload.length()
             if (size == 0L) throw BadRequestException("文件是空的")
             if (size > maxBytes()) throw BadRequestException("文件过大（最大 ${settings.getInt(SettingService.LOCAL_BOOK_MAX_MB)}MB）")
@@ -125,8 +182,8 @@ class LocalBookService(
                 UmdParser.looksLikeUmd(upload) -> "umd"
                 // zip 但不是 EPUB（没有 mimetype）：普通压缩包、Office 文档、漫画包等
                 EpubParser.isZip(upload) -> throw BadRequestException(
-                    if (ext == "epub") "不是有效的 EPUB 文件（缺少 mimetype）"
-                    else "这是 zip 压缩包，不是电子书（只支持 EPUB、TXT、MOBI、AZW3、AZW、UMD、PDF）"
+                    if (ext == "epub") "不是有效的 EPUB 文件（找不到 OPF）"
+                    else "这是 zip 压缩包，不是电子书"
                 )
                 ext == "epub" || ext == "pdf" || ext == "umd" || ext in MOBI_EXT ->
                     throw BadRequestException("不是有效的 ${ext.uppercase()} 文件（文件头不正确）")

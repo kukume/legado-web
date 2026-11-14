@@ -3,7 +3,7 @@ import { locale } from '@/i18n'
 import type {
   Book, BookGroup, Bookmark, BookSearchResult, ReadingSummary, LocalBookInfo, TtsEngine, TtsEngineConfig, Chapter, ChapterContent, ExploreKind, ImportResult, Invite, LoginConfig,
   LoginV2Render, Me, PublicConfig, ReplaceRule, SearchBook, SourceSummary, Subscription, User,
-  DictRule, TxtTocRule,
+  DictRule, TxtTocRule, ZlibStatus, ZlibBook, ZlibJob, ZlibAccount, LocalArchiveResult,
 } from './types'
 import { t } from '@/i18n'
 
@@ -53,10 +53,32 @@ export const adminApi = {
   saveSettings: (s: Record<string, string>) => http.put<Record<string, string>>('/api/admin/settings', s),
   /** 测试浏览器调试地址，返回浏览器版本 */
   testBrowser: (cdp: string) => http.post<{ browser: string; userAgent: string }>('/api/admin/browser/test', { cdp }),
+  /** 测试 Z-Library 代理连通性（空表示直连）；失败时抛出带原因的错误 */
+  testZlibProxy: (proxy: string) => http.post('/api/zlib/test-proxy', { proxy }),
   /** 当前版本（构建时间）与最近一次检查更新的结果 */
   /** auto 为 true 时（管理员打开网页）服务端按需检查一次 */
   update: (auto = false) => http.get<UpdateStatus>(`/api/admin/update${auto ? '?auto=true' : ''}`),
   checkUpdate: () => http.post<UpdateStatus>('/api/admin/update/check'),
+}
+
+/** Z-Library 搜索下载 */
+export const zlibApi = {
+  config: () => http.get<ZlibStatus>('/api/zlib/config'),
+  login: (email: string, password: string) => http.post<ZlibAccount>('/api/zlib/login', { email, password }),
+  logout: () => http.post('/api/zlib/logout', {}),
+  /** 已登录时联网获取额度（已用 / 额度、重置倒计时）；未登录或失效时 account 为 null */
+  account: () => http.get<{ account: ZlibAccount | null }>('/api/zlib/account'),
+  search: (params: { q: string; page?: number; order?: string; ext?: string[]; lang?: string[] }) => {
+    const p = new URLSearchParams()
+    p.set('q', params.q)
+    if (params.page && params.page > 1) p.set('page', String(params.page))
+    if (params.order) p.set('order', params.order)
+    for (const e of params.ext || []) p.append('ext', e)
+    for (const l of params.lang || []) p.append('lang', l)
+    return http.get<ZlibBook[]>(`/api/zlib/search?${p}`)
+  },
+  download: (book: ZlibBook, groupId = 0) => http.post<ZlibJob>('/api/zlib/download', { book, groupId }),
+  jobs: () => http.get<ZlibJob[]>('/api/zlib/downloads'),
 }
 
 export interface SourceDetail {
@@ -216,6 +238,8 @@ export const shelfApi = {
   get: (id: number) => http.get<Book>(`/api/shelf/${id}`),
   update: (id: number, data: Partial<Pick<Book, 'name' | 'author' | 'groupId' | 'inShelf' | 'customCoverUrl' | 'customIntro' | 'canUpdate' | 'order' | 'reSegment' | 'removeSameTitle' | 'useReplaceRule'>>) =>
     http.patch<Book>(`/api/shelf/${id}`, data),
+  /** 换封面：服务器按书源 + 书籍地址从搜索结果里取封面网址（customCoverUrl 通过 update 只能清空） */
+  setCover: (id: number, sourceId: number, bookUrl: string) => http.post<Book>(`/api/shelf/${id}/cover`, { sourceId, bookUrl }),
   remove: (id: number) => http.del(`/api/shelf/${id}`),
   /** 手动排序：按新顺序排列的书籍 id */
   saveOrder: (ids: number[]) => http.put('/api/shelf/order', { ids }),
@@ -239,8 +263,9 @@ export const shelfApi = {
   localInfo: () => http.get<LocalBookInfo>('/api/shelf/local/info'),
   /** 上传本地书籍（EPUB / TXT / MOBI / AZW3 / AZW / UMD / PDF），onProgress 为 0-1 */
   /** pages：PDF 的页数（浏览器读出后提交，服务器按页数生成目录） */
+  /** zip 压缩包（服务器按文件头判断）解压后逐本导入，返回 LocalArchiveResult */
   uploadLocal: (file: File, groupId: number, onProgress?: (p: number) => void, pages?: number) =>
-    new Promise<Book>((resolve, reject) => {
+    new Promise<Book | LocalArchiveResult>((resolve, reject) => {
       const q = new URLSearchParams({ name: file.name, groupId: String(groupId) })
       if (pages) q.set('pages', String(pages))
       const xhr = new XMLHttpRequest()
@@ -252,7 +277,7 @@ export const shelfApi = {
       xhr.onload = () => {
         let data: any = null
         try { data = JSON.parse(xhr.responseText) } catch { /* ignore */ }
-        if (xhr.status >= 200 && xhr.status < 300) resolve(data as Book)
+        if (xhr.status >= 200 && xhr.status < 300) resolve(data as Book | LocalArchiveResult)
         else reject(new ApiError(xhr.status, data?.error || t('上传失败（{0}）', [xhr.status])))
       }
       xhr.onerror = () => reject(new NetworkError())

@@ -8,7 +8,8 @@
     "build": "vue-tsc --noEmit && vite build",
     "build:fast": "vite build",
     "i18n": "node scripts/i18n.mjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "splash": "node scripts/apple-splash.mjs"
   },
   "dependencies": {
     "@cap.js/wasm": "0.0.8",
@@ -28,6 +29,7 @@
     "@types/sortablejs": "^1.15.9",
     "@vitejs/plugin-vue": "^6.0.10",
     "opencc-js": "1.4.2",
+    "sharp": "^0.35.5",
     "typescript": "^6.0.3",
     "vite": "^8.3.8",
     "vite-plugin-pwa": "^2.0.0",

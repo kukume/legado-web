@@ -129,7 +129,7 @@ const columns = computed(() => (isMobile.value ? mobileCols : desktopColumns))
       :class="{ 'm-table': isMobile }"
       :scroll-x="isMobile ? undefined : 700"
       :table-layout="isMobile ? 'fixed' : 'auto'"
-      :pagination="{ pageSize: 20 }"
+      :pagination="{ pageSize: 20, simple: isMobile }"
     />
     <n-modal v-model:show="show" preset="card" :title="t('生成邀请码')" style="max-width: 420px">
       <n-space vertical>

@@ -52,6 +52,7 @@ import io.legado.web.service.ReadingStatsService
 import io.legado.web.service.WebDavService
 import io.legado.web.service.BrowserBridge
 import io.legado.web.routes.browserRoutes
+import io.legado.web.routes.zlibraryRoutes
 import io.legado.app.help.source.SourceVerificationHelp
 import io.ktor.server.sse.SSE
 import io.ktor.server.websocket.WebSockets
@@ -175,6 +176,7 @@ fun Application.module() {
     configService.remoteBrowser = { browserBridge.remoteAvailable() }
     val proxyService = ProxyService(sourceService, shelfService)
     val apiKeyService = ApiKeyService(userService)
+    val zlibraryService = io.legado.web.service.ZLibraryService(settingService, localBookService)
 
     // ---------- 插件 ----------
     install(ContentNegotiation) {
@@ -268,7 +270,7 @@ fun Application.module() {
         authRoutes(userService, jwtService, settingService, captchaService, updateService)
         longCallRoutes()
         sourceRoutes(sourceService, configService, searchService, subscriptionService, io.legado.web.service.SourceCheckService(sourceService, settingService))
-        shelfRoutes(shelfService, replaceService, proxyService, configService, reviewService, localBookService)
+        shelfRoutes(shelfService, searchService, replaceService, proxyService, configService, reviewService, localBookService)
         openApiRoutes(apiKeyService, shelfService, readingStatsService)
         backupRoutes(backupService, webDavService)
         mediaRoutes(audioService, ttsService, io.legado.web.service.FontService(appSettings.dataDir))
@@ -276,6 +278,7 @@ fun Application.module() {
         readingStatsRoutes(readingStatsService)
         ruleRoutes(dictRuleService, txtTocRuleService)
         browserRoutes(browserBridge)
+        zlibraryRoutes(zlibraryService)
         route("/openapi/{...}") {
             handle { call.respond(HttpStatusCode.NotFound, ErrorResponse(io.legado.web.i18n.Messages.translate(call, "接口不存在"))) }
         }

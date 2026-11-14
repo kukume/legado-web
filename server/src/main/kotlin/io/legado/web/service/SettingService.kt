@@ -59,6 +59,12 @@ class SettingService {
         const val USER_AGENT = "userAgent"
         /** 管理员打开网页时检查镜像仓库里是否有新版本（只提示管理员） */
         const val UPDATE_CHECK_ENABLED = "updateCheckEnabled"
+        /** 是否开启 Z-Library 搜索下载功能 */
+        const val ZLIB_ENABLED = "zlibEnabled"
+        /** Z-Library 站点地址（镜像） */
+        const val ZLIB_HOST = "zlibHost"
+        /** Z-Library 使用的代理（全局，由管理员配置，可留空直连）：http/socks5://[用户名:密码@]host:port */
+        const val ZLIB_PROXY = "zlibProxy"
         /** 读取设置时密钥的占位符；保存时收到它表示“不修改” */
         const val SECRET_MASK = "********"
         private val secretKeys = setOf(CAP_SECRET)
@@ -85,6 +91,9 @@ class SettingService {
             SEARCH_TIMEOUT_SECONDS to "30",
             THREAD_COUNT to "8",
             USER_AGENT to "",
+            ZLIB_ENABLED to "false",
+            ZLIB_HOST to "https://z-library.biz",
+            ZLIB_PROXY to "",
         )
     }
 
@@ -134,6 +143,16 @@ class SettingService {
         }
         if (allowed[REGISTRATION_MODE]?.let { it !in setOf("invite", "closed") } == true) {
             throw io.legado.web.auth.BadRequestException("registrationMode 只能是 invite/closed")
+        }
+        allowed[ZLIB_HOST]?.trim()?.takeIf { it.isNotEmpty() }?.let {
+            if (!it.startsWith("http://") && !it.startsWith("https://")) {
+                throw io.legado.web.auth.BadRequestException("Z-Library 地址需要以 http:// 或 https:// 开头")
+            }
+        }
+        allowed[ZLIB_PROXY]?.trim()?.takeIf { it.isNotEmpty() }?.let {
+            if (!Regex("^(http|socks4|socks5)://(?:[^:@/]+:[^@/]+@)?[^:@/]+:\\d{1,5}$").matches(it)) {
+                throw io.legado.web.auth.BadRequestException("代理格式错误，应为 socks5://[用户名:密码@]host:port")
+            }
         }
         dbQuery {
             allowed.forEach { (k, v) ->

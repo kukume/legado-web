@@ -8,11 +8,11 @@ import { t } from '@/i18n'
 
 /**
  * 换封面（与 App 相同）：用书名在所有启用的书源中搜索，列出同名书籍的封面供选择。
- * 选中后通过 select 返回封面地址，空字符串表示恢复为书源封面
+ * 选中后通过 select 返回选中的搜索结果（服务器按书源 + 书籍地址自己取封面，不提交封面网址），null 表示恢复为书源封面
  */
 const props = defineProps<{ book: Book | null }>()
 const show = defineModel<boolean>('show', { default: false })
-const emit = defineEmits<{ select: [url: string] }>()
+const emit = defineEmits<{ select: [result: SearchBook | null] }>()
 const message = useMessage()
 
 const results = ref<SearchBook[]>([])
@@ -63,9 +63,9 @@ async function start() {
   }
 }
 
-function pick(url: string) {
+function pick(r: SearchBook | null) {
   controller?.abort()
-  emit('select', url)
+  emit('select', r)
   show.value = false
 }
 </script>
@@ -85,11 +85,11 @@ function pick(url: string) {
       <n-switch v-model:value="matchAuthor" size="small" />
     </div>
     <div class="cover-grid">
-      <button v-if="book?.customCoverUrl" class="cover-item" @click="pick('')">
+      <button v-if="book?.customCoverUrl" class="cover-item" @click="pick(null)">
         <book-cover :url="book.coverUrl" :name="book.name" :author="book.author" :origin="book.origin" />
         <span class="cover-src">{{ t('恢复书源封面') }}</span>
       </button>
-      <button v-for="r in covers" :key="r.coverUrl!" class="cover-item" :class="{ current: r.coverUrl === (book?.customCoverUrl || book?.coverUrl) }" @click="pick(r.coverUrl!)">
+      <button v-for="r in covers" :key="r.coverUrl!" class="cover-item" :class="{ current: r.coverUrl === (book?.customCoverUrl || book?.coverUrl) }" @click="pick(r)">
         <book-cover :url="r.coverUrl" :name="r.name" :author="r.author" :source-id="r.sourceId" />
         <span class="cover-src ellipsis">{{ r.originName }}</span>
       </button>
