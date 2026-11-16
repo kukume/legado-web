@@ -10,7 +10,9 @@ import { replaceApi } from '@/api'
 import type { ReplaceRule } from '@/api/types'
 import { downloadText } from '@/utils/media'
 import { t } from '@/i18n'
+import { useBusy } from '@/composables/useBusy'
 
+const busy = useBusy()
 const message = useMessage()
 const dialog = useDialog()
 const rules = ref<ReplaceRule[]>([])
@@ -158,14 +160,14 @@ const columns = computed(() =>
         <n-form-item :label="t('排序')"><n-input-number v-model:value="editing.order" /></n-form-item>
       </n-form>
       <template #footer>
-        <n-space justify="end"><n-button type="primary" @click="save">{{ t('保存') }}</n-button></n-space>
+        <n-space justify="end"><n-button type="primary" :loading="busy.is('save')" @click="busy.run('save', save)">{{ t('保存') }}</n-button></n-space>
       </template>
     </n-modal>
 
     <n-modal v-model:show="showImport" preset="card" :title="t('导入替换规则')" style="max-width: 560px">
       <n-input v-model:value="importText" type="textarea" :autosize="{ minRows: 8, maxRows: 16 }" :placeholder="t('粘贴替换规则 JSON')" class="mono" />
       <template #footer>
-        <n-space justify="end"><n-button type="primary" @click="doImport">{{ t('导入') }}</n-button></n-space>
+        <n-space justify="end"><n-button type="primary" :loading="busy.is('doImport')" @click="busy.run('doImport', doImport)">{{ t('导入') }}</n-button></n-space>
       </template>
     </n-modal>
   </div>

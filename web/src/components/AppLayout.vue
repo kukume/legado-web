@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h, onMounted, watch, type Component } from 'vue'
+import { computed, h, onMounted, onUnmounted, watch, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NIcon, NDropdown, NButton, useNotification } from 'naive-ui'
 import { ChevronBack, MoonOutline, SunnyOutline, ContrastOutline } from '@vicons/ionicons5'
@@ -7,6 +7,7 @@ import { useNavBars } from '@/composables/useNavBars'
 import { useAuthStore } from '@/stores/auth'
 import { useUiStore } from '@/stores/ui'
 import { useUpdateStore, versionName } from '@/stores/update'
+import { useZlibStore } from '@/stores/zlib'
 import { t } from '@/i18n'
 
 const route = useRoute()
@@ -42,6 +43,35 @@ watch(
   },
   { immediate: true },
 )
+
+// Z-Library 下载：打开网页时查一次（刷新页面前还在下载的任务继续跟踪），
+// 下载完成 / 失败时在任何页面都弹出提示，完成的可以直接打开
+const zlib = useZlibStore()
+watch(
+  () => auth.me?.zlibEnabled,
+  (on) => {
+    if (on) zlib.refresh()
+  },
+  { immediate: true },
+)
+const offZlib = zlib.onFinished((job) => {
+  const title = job.title || t('未知书名')
+  if (job.status === 'done') {
+    const n = notification.success({
+      title: t('已导入书架'),
+      content: title,
+      action:
+        job.importedBookId == null
+          ? undefined
+          : () =>
+              h(NButton, { size: 'small', type: 'primary', onClick: () => { n.destroy(); router.push({ name: 'book', params: { id: job.importedBookId! } }) } }, () => t('打开')),
+      duration: 8000,
+    })
+  } else {
+    notification.error({ title: t('下载失败'), content: job.error ? `${title}：${job.error}` : title, duration: 10000 })
+  }
+})
+onUnmounted(offZlib)
 
 // 导航入口：按“我的 → 导航栏”的设置显示或隐藏（见 useNavBars）
 const { sideNav, bottomNav, hiddenHere } = useNavBars()

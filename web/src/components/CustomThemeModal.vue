@@ -5,8 +5,10 @@ import { prefsApi } from '@/api'
 import { customToTheme, type CustomTheme } from '@/stores/reader'
 import { parseHex } from '@/utils/color'
 import { t } from '@/i18n'
+import { useBusy } from '@/composables/useBusy'
 
 /** 新建 / 编辑自定义阅读主题（只有颜色） */
+const busy = useBusy()
 const props = defineProps<{ show: boolean; theme: CustomTheme | null }>()
 const emit = defineEmits<{ 'update:show': [boolean]; saved: [CustomTheme]; deleted: [string] }>()
 const message = useMessage()
@@ -121,7 +123,7 @@ function remove() {
         <span v-else />
         <n-space>
           <n-button @click="emit('update:show', false)">{{ t('取消') }}</n-button>
-          <n-button type="primary" @click="save">{{ t('保存') }}</n-button>
+          <n-button type="primary" :loading="busy.is('save')" @click="busy.run('save', save)">{{ t('保存') }}</n-button>
         </n-space>
       </n-space>
     </template>

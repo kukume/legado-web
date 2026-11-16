@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import {
   NButton, NIcon, NInput, NInputGroup, NEmpty, NModal, NDrawer, NDrawerContent, NSelect,
@@ -11,7 +12,8 @@ import {
 } from '@vicons/ionicons5'
 import { zlibApi } from '@/api'
 import type { ZlibStatus, ZlibBook, ZlibJob, ZlibAccount } from '@/api/types'
-import { t } from '@/i18n'
+import { locale, t } from '@/i18n'
+import { useZlibStore } from '@/stores/zlib'
 
 defineOptions({ name: 'ZLibraryView' })
 
@@ -28,7 +30,9 @@ const searching = ref(false)
 const results = ref<ZlibBook[]>([])
 const searched = ref(false)
 
-const jobs = ref<ZlibJob[]>([])
+// 下载任务在全局 store 里查询（离开页面后继续，完成时全局提示）
+const zlib = useZlibStore()
+const { jobs, activeCount } = storeToRefs(zlib)
 const showDownloads = ref(false)
 const downloadingIds = ref<Set<string>>(new Set())
 
@@ -56,14 +60,15 @@ async function loadAccount() {
   }
 }
 
-/** 重置倒计时：把站点的英文原文（如 "5 hours 30 minutes"）换成中文 */
+/** 重置倒计时：把站点的英文原文（如 "5 hours 30 minutes"）换成中文；英文界面直接用原文 */
 function resetText(s: string): string {
+  if (locale === 'en') return s
   return s
-    .replace(/\bhours?\b/gi, '小时')
-    .replace(/\bminutes?\b/gi, '分钟')
-    .replace(/\bdays?\b/gi, '天')
+    .replace(/\bhours?\b/gi, t('小时'))
+    .replace(/\bminutes?\b/gi, t('分钟'))
+    .replace(/\bdays?\b/gi, t('天'))
     .replace(/\band\b/gi, ' ')
-    .replace(/less than\s*/i, '不到 ')
+    .replace(/less than\s*/i, t('不到') + ' ')
     .replace(/\s+/g, ' ')
     .trim()
 }
@@ -75,10 +80,6 @@ const orderOptions = [
   { label: t('年份'), value: 'year' },
   { label: t('文件大小'), value: 'filesize' },
 ]
-
-const activeCount = computed(
-  () => jobs.value.filter((j) => j.status === 'queued' || j.status === 'downloading' || j.status === 'importing').length,
-)
 
 async function loadStatus() {
   loadingStatus.value = true
@@ -111,10 +112,9 @@ async function download(book: ZlibBook) {
   downloadingIds.value.add(book.id)
   try {
     const job = await zlibApi.download(book)
-    jobs.value = [job, ...jobs.value.filter((j) => j.id !== job.id)]
+    zlib.add(job)
     showDownloads.value = true
-    startPolling()
-    message.success(t('已开始下载，完成后自动导入书架'))
+    message.success(t('已开始下载，完成后自动导入书架，可以离开这个页面'))
   } catch (e: any) {
     message.error(e.message || t('下载失败'))
   } finally {
@@ -122,30 +122,6 @@ async function download(book: ZlibBook) {
   }
 }
 
-let timer: number | null = null
-async function pollJobs() {
-  const wasActive = activeCount.value > 0
-  try {
-    jobs.value = await zlibApi.jobs()
-  } catch {
-    /* 忽略一次轮询失败 */
-  }
-  if (activeCount.value === 0) {
-    stopPolling()
-    // 下载结束后刷新已用额度
-    if (wasActive && status.value?.loggedIn) loadAccount()
-  }
-}
-function startPolling() {
-  if (timer != null) return
-  timer = window.setInterval(pollJobs, 1500)
-}
-function stopPolling() {
-  if (timer != null) {
-    clearInterval(timer)
-    timer = null
-  }
-}
 
 async function doLogin() {
   if (!loginForm.value.email.trim() || !loginForm.value.password) {
@@ -198,17 +174,15 @@ function fmtBytes(n: number) {
   return `${(n / 1024 / 1024).toFixed(1)} MB`
 }
 
+// 下载结束后刷新已用额度
+const offFinished = zlib.onFinished(() => {
+  if (status.value?.loggedIn) loadAccount()
+})
 onMounted(() => {
   loadStatus()
-  pollJobs().then(() => {
-    if (activeCount.value > 0) startPolling()
-  })
+  zlib.refresh()
 })
-onActivated(() => {
-  if (activeCount.value > 0) startPolling()
-})
-onDeactivated(stopPolling)
-onUnmounted(stopPolling)
+onUnmounted(offFinished)
 </script>
 
 <template>
@@ -226,7 +200,7 @@ onUnmounted(stopPolling)
             {{ t('登录') }}
           </n-button>
         </template>
-        <n-button size="small" type="primary" tertiary @click="(showDownloads = true), pollJobs()">
+        <n-button size="small" type="primary" tertiary @click="(showDownloads = true), zlib.refresh()">
           <template #icon><n-icon :component="CloudDownloadOutline" /></template>
           {{ t('下载记录') }}<span v-if="activeCount" class="badge">{{ activeCount }}</span>
         </n-button>
@@ -333,7 +307,7 @@ onUnmounted(stopPolling)
     </n-modal>
 
     <!-- 下载记录（小页面） -->
-    <n-drawer v-model:show="showDownloads" :width="380" placement="right">
+    <n-drawer v-model:show="showDownloads" width="min(380px, 100vw)" placement="right">
       <n-drawer-content :title="t('下载记录')" closable>
         <n-empty v-if="!jobs.length" :description="t('还没有下载任务')" style="margin-top: 40px" />
         <div v-else class="jobs">

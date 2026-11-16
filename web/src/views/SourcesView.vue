@@ -407,9 +407,17 @@ async function refreshSub(s: Subscription) {
   }
 }
 
-async function removeSub(s: Subscription) {
-  await subscriptionApi.remove(s.id)
-  await loadSubs()
+function removeSub(s: Subscription) {
+  dialog.warning({
+    title: t('删除订阅'),
+    content: t('确定删除订阅「{0}」？已导入的书源不会删除，只是不再自动更新。', [s.name]),
+    positiveText: t('删除'),
+    negativeText: t('取消'),
+    onPositiveClick: async () => {
+      await subscriptionApi.remove(s.id)
+      await loadSubs()
+    },
+  })
 }
 
 const statusOptions = [

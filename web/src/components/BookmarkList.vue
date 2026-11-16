@@ -5,8 +5,10 @@ import { CreateOutline, TrashOutline } from '@vicons/ionicons5'
 import { bookmarkApi } from '@/api'
 import type { Bookmark } from '@/api/types'
 import { t } from '@/i18n'
+import { useBusy } from '@/composables/useBusy'
 
 /** 阅读页目录抽屉里的书签列表 */
+const busy = useBusy()
 const props = defineProps<{ bookId: number; active: boolean }>()
 const emit = defineEmits<{ jump: [Bookmark] }>()
 const message = useMessage()
@@ -105,7 +107,7 @@ defineExpose({ load })
       <template #footer>
         <n-space justify="end">
           <n-button @click="editing = null">{{ t('取消') }}</n-button>
-          <n-button type="primary" @click="saveNote">{{ t('保存') }}</n-button>
+          <n-button type="primary" :loading="busy.is('saveNote')" @click="busy.run('saveNote', saveNote)">{{ t('保存') }}</n-button>
         </n-space>
       </template>
     </n-modal>

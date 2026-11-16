@@ -324,7 +324,7 @@ const typeOptions = [
 <template>
   <div class="page wide">
     <div class="page-header">
-      <n-button quaternary circle @click="goBack(router, { name: 'sources' })">
+      <n-button quaternary circle :title="t('返回')" :aria-label="t('返回')" @click="goBack(router, { name: 'sources' })">
         <template #icon><n-icon :component="ArrowBackOutline" /></template>
       </n-button>
       <h2>{{ id ? (canEdit ? t('编辑书源') : t('查看书源')) : t('新建书源') }}<span class="muted name" :title="src.bookSourceName">{{ src.bookSourceName }}</span></h2>

@@ -20,7 +20,9 @@ import type { Book, BookGroup, Chapter, SearchBook } from '@/api/types'
 import { formatTime } from '@/utils/media'
 import { t } from '@/i18n'
 import { isPdfBook } from '@/utils/pdf'
+import { useBusy } from '@/composables/useBusy'
 
+const busy = useBusy()
 const route = useRoute()
 const isMobile = useIsMobile()
 const router = useRouter()
@@ -257,13 +259,13 @@ async function onMore(key: string) {
 
 // 编辑
 const showEdit = ref(false)
-const editForm = ref({ name: '', author: '', customCoverUrl: '', customIntro: '', groupId: 0, canUpdate: true })
+// 封面不在表单里：换封面 / 恢复书源封面都立即生效（不受“取消”影响）
+const editForm = ref({ name: '', author: '', customIntro: '', groupId: 0, canUpdate: true })
 function openEdit() {
   const b = book.value!
   editForm.value = {
     name: b.name,
     author: b.author,
-    customCoverUrl: b.customCoverUrl || '',
     customIntro: b.customIntro || '',
     groupId: b.groupId,
     canUpdate: b.canUpdate,
@@ -276,27 +278,23 @@ async function saveEdit() {
 }
 const groupOptions = computed(() => [{ label: t('未分组'), value: 0 }, ...groups.value.map((g) => ({ label: g.name, value: g.id }))])
 
-// 换封面：选中书源里的封面后直接保存（服务器按书源 + 书籍地址取封面网址）。
-// 在编辑书籍里选择时同步到表单；“恢复书源封面”在编辑书籍里点保存后生效
+// 换封面：选中书源里的封面 / 恢复书源封面都立即保存（服务器按书源 + 书籍地址取封面网址）
 const showCover = ref(false)
-let coverTarget: 'direct' | 'edit' = 'direct'
-function openCover(target: 'direct' | 'edit') {
-  coverTarget = target
+function openCover() {
   showCover.value = true
 }
+const coverSaving = ref(false)
 async function onCoverSelect(r: SearchBook | null) {
-  if (!r && coverTarget === 'edit') {
-    editForm.value.customCoverUrl = ''
-    return
-  }
+  coverSaving.value = true
   try {
     book.value = r
       ? await shelfApi.setCover(book.value!.id, r.sourceId, r.bookUrl)
       : await shelfApi.update(book.value!.id, { customCoverUrl: '' })
-    if (coverTarget === 'edit') editForm.value.customCoverUrl = book.value.customCoverUrl || ''
-    message.success(t('封面已更换'))
+    message.success(r ? t('封面已更换') : t('已恢复书源封面'))
   } catch (e: any) {
     message.error(e.message)
+  } finally {
+    coverSaving.value = false
   }
 }
 
@@ -313,7 +311,7 @@ function onChanged(nb: Book) {
 <template>
   <div class="page">
     <div class="page-header">
-      <n-button quaternary circle @click="goBack(router, { name: 'shelf' })">
+      <n-button quaternary circle :title="t('返回')" :aria-label="t('返回')" @click="goBack(router, { name: 'shelf' })">
         <template #icon><n-icon :component="ArrowBackOutline" /></template>
       </n-button>
       <h2>{{ t('书籍详情') }}</h2>
@@ -329,7 +327,7 @@ function onChanged(nb: Book) {
     <template v-if="book">
       <div class="card head">
         <div class="head-main">
-        <button class="cover-btn" :title="t('换封面')" @click="openCover('direct')">
+        <button class="cover-btn" :title="t('换封面')" @click="openCover">
           <book-cover :url="book.customCoverUrl || book.coverUrl" :name="book.name" :author="book.author" :origin="book.origin" :width="isMobile ? 92 : 120" />
         </button>
         <div class="info">
@@ -376,7 +374,7 @@ function onChanged(nb: Book) {
               <n-button v-if="!isPdf" :disabled="offlineMode" :loading="refreshing" @click="refresh(false)">{{ book.isLocal ? t('重新解析目录') : t('更新目录') }}</n-button>
             </n-button-group>
             <n-dropdown :options="moreOptions" :disabled="offlineMode" @select="onMore">
-              <n-button quaternary circle :disabled="offlineMode">
+              <n-button quaternary circle :title="t('更多')" :aria-label="t('更多')" :disabled="offlineMode">
                 <template #icon><n-icon :component="EllipsisHorizontal" /></template>
               </n-button>
             </n-dropdown>
@@ -431,14 +429,14 @@ function onChanged(nb: Book) {
         <n-form-item :label="t('封面')">
           <div class="cover-input">
             <book-cover
-              :url="editForm.customCoverUrl || book?.coverUrl"
+              :url="book?.customCoverUrl || book?.coverUrl"
               :name="book?.name"
               :author="book?.author"
               :origin="book?.origin"
               :width="48"
             />
-            <n-button @click="openCover('edit')">{{ t('换封面') }}</n-button>
-            <n-button v-if="editForm.customCoverUrl" quaternary size="small" @click="editForm.customCoverUrl = ''">
+            <n-button :loading="coverSaving" @click="openCover">{{ t('换封面') }}</n-button>
+            <n-button v-if="book?.customCoverUrl" quaternary size="small" :disabled="coverSaving" @click="onCoverSelect(null)">
               {{ t('恢复书源封面') }}
             </n-button>
           </div>
@@ -449,7 +447,7 @@ function onChanged(nb: Book) {
       <template #footer>
         <n-space justify="end">
           <n-button @click="showEdit = false">{{ t('取消') }}</n-button>
-          <n-button type="primary" @click="saveEdit">{{ t('保存') }}</n-button>
+          <n-button type="primary" :loading="busy.is('saveEdit')" @click="busy.run('saveEdit', saveEdit)">{{ t('保存') }}</n-button>
         </n-space>
       </template>
     </n-modal>

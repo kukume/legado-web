@@ -156,6 +156,7 @@ function logout() {
           </n-checkbox>
         </div>
       </div>
+      <p class="muted small nav-tip">{{ t('隐藏的入口可以在本页顶部找到') }}</p>
     </n-card>
 
     <n-card size="small" class="block">
@@ -276,6 +277,9 @@ function logout() {
   line-height: 18px;
 }
 
+.nav-tip {
+  margin: 10px 0 0;
+}
 /* 导航栏设置：侧栏、底栏两列，窄屏上下排列 */
 .nav-cfg {
   display: grid;

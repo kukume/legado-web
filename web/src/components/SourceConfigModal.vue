@@ -10,7 +10,9 @@ import CookieHelp from '@/components/CookieHelp.vue'
 import { flexItemStyle } from '@/utils/flex'
 import { safeHref } from '@/utils/safeUrl'
 import { t } from '@/i18n'
+import { useBusy } from '@/composables/useBusy'
 
+const busy = useBusy()
 const props = defineProps<{ show: boolean; sourceId: number | null }>()
 const emit = defineEmits<{ (e: 'update:show', v: boolean): void }>()
 const message = useMessage()
@@ -488,7 +490,7 @@ async function saveVariable() {
             class="mono"
           />
           <n-space justify="end" style="margin-top: 12px">
-            <n-button type="primary" @click="saveVariable">{{ t('保存变量') }}</n-button>
+            <n-button type="primary" :loading="busy.is('saveVariable')" @click="busy.run('saveVariable', saveVariable)">{{ t('保存变量') }}</n-button>
           </n-space>
         </n-tab-pane>
       </n-tabs>

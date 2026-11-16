@@ -10,8 +10,10 @@ import { txtTocApi } from '@/api'
 import type { TxtTocRule } from '@/api/types'
 import { downloadText } from '@/utils/media'
 import { t } from '@/i18n'
+import { useBusy } from '@/composables/useBusy'
 
 /** TXT 目录规则：上传 TXT 时用来分章，与阅读 App 的 TXT 目录规则格式相同 */
+const busy = useBusy()
 const message = useMessage()
 const dialog = useDialog()
 const rules = ref<TxtTocRule[]>([])
@@ -228,7 +230,7 @@ const columns = computed<DataTableColumns<TxtTocRule>>(() => isMobile.value ? mo
       <n-alert v-if="!canEdit" type="info" :bordered="false" style="margin-bottom: 10px">{{ t('带 js 处理的规则需要“添加书源”的权限才能导入。') }}</n-alert>
       <n-input v-model:value="importText" type="textarea" :autosize="{ minRows: 8, maxRows: 16 }" :placeholder="t('粘贴 TXT 目录规则 JSON（数组或单个规则），id 相同的规则会被覆盖')" class="mono" />
       <template #footer>
-        <n-space justify="end"><n-button type="primary" @click="doImport">{{ t('导入') }}</n-button></n-space>
+        <n-space justify="end"><n-button type="primary" :loading="busy.is('doImport')" @click="busy.run('doImport', doImport)">{{ t('导入') }}</n-button></n-space>
       </template>
     </n-modal>
   </div>

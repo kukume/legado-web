@@ -17,6 +17,7 @@ import type { Book, BookGroup, LocalBookInfo } from '@/api/types'
 import { formatTime } from '@/utils/media'
 import { isNetworkError } from '@/api/http'
 import { useOfflineStore } from '@/stores/offline'
+import { useZlibStore } from '@/stores/zlib'
 import { t } from '@/i18n'
 
 defineOptions({ name: 'ShelfView' })
@@ -284,6 +285,14 @@ onMounted(load)
 onActivated(() => {
   if (!loading.value) load()
 })
+// Z-Library 下载的书导入完成：正停在书架页时也刷新
+const zlib = useZlibStore()
+watch(
+  () => zlib.importedTick,
+  () => {
+    if (!loading.value) load()
+  },
+)
 
 // 网络断开 / 恢复（包括连着网但服务器不可达、之后探测到服务器恢复）时自动刷新书架
 watch(
@@ -402,11 +411,19 @@ async function renameGroup(g: BookGroup, name: string) {
   await groupApi.update(g.id, name.trim(), g.order)
   g.name = name.trim()
 }
-async function removeGroup(g: BookGroup) {
-  await groupApi.remove(g.id)
-  groups.value = groups.value.filter((x) => x.id !== g.id)
-  books.value.forEach((b) => b.groupId === g.id && (b.groupId = 0))
-  if (activeGroup.value === g.id) activeGroup.value = -1
+function removeGroup(g: BookGroup) {
+  dialog.warning({
+    title: t('删除分组'),
+    content: t('确定删除分组「{0}」？其中的书不会删除，会移到“未分组”。', [g.name]),
+    positiveText: t('删除'),
+    negativeText: t('取消'),
+    onPositiveClick: async () => {
+      await groupApi.remove(g.id)
+      groups.value = groups.value.filter((x) => x.id !== g.id)
+      books.value.forEach((b) => b.groupId === g.id && (b.groupId = 0))
+      if (activeGroup.value === g.id) activeGroup.value = -1
+    },
+  })
 }
 
 const icon = (c: any) => () => h(NIcon, null, { default: () => h(c) })
@@ -513,7 +530,7 @@ const icon = (c: any) => () => h(NIcon, null, { default: () => h(c) })
             <div v-else class="muted ellipsis small">{{ t('最新：{0} · {1}', [b.latestChapterTitle || '-', formatTime(b.lastCheckTime)]) }}</div>
           </div>
           <n-dropdown v-if="!selecting" trigger="click" :options="menuFor(b)" @select="(k: string) => onMenu(k, b)">
-            <n-button quaternary circle size="small" :render-icon="icon(EllipsisVertical)" @click.stop />
+            <n-button quaternary circle size="small" :title="t('更多')" :aria-label="t('更多')" :render-icon="icon(EllipsisVertical)" @click.stop />
           </n-dropdown>
         </div>
       </div>

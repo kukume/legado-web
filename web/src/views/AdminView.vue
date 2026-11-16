@@ -16,7 +16,9 @@ import type { User } from '@/api/types'
 import { useAuthStore } from '@/stores/auth'
 import { formatDate, formatTime } from '@/utils/media'
 import { t } from '@/i18n'
+import { useBusy } from '@/composables/useBusy'
 
+const busy = useBusy()
 const message = useMessage()
 const dialog = useDialog()
 const auth = useAuthStore()
@@ -595,7 +597,7 @@ async function saveSettings() {
         <n-input v-model:value="createForm.username" :placeholder="t('用户名')" />
         <n-input v-model:value="createForm.password" type="password" :placeholder="t('密码（至少 6 位）')" />      </n-space>
       <template #footer>
-        <n-space justify="end"><n-button type="primary" @click="createUser">{{ t('创建') }}</n-button></n-space>
+        <n-space justify="end"><n-button type="primary" :loading="busy.is('createUser')" @click="busy.run('createUser', createUser)">{{ t('创建') }}</n-button></n-space>
       </template>
     </n-modal>
   </div>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, h, onMounted, ref } from 'vue'
 import {
-  NAlert, NButton, NDataTable, NInput, NInputNumber, NModal, NSpace, NSwitch, NTag, useMessage, type DataTableColumns,
+  NAlert, NButton, NDataTable, NInput, NInputNumber, NModal, NSpace, NSwitch, NTag, useDialog, useMessage, type DataTableColumns,
 } from 'naive-ui'
 import { inviteApi } from '@/api'
 import type { Invite } from '@/api/types'
@@ -9,9 +9,12 @@ import { copyText, formatDate } from '@/utils/media'
 import { t } from '@/i18n'
 import { useIsMobile } from '@/composables/useIsMobile'
 import { mobileColumns } from '@/utils/mobileTable'
+import { useBusy } from '@/composables/useBusy'
 
+const busy = useBusy()
 const props = defineProps<{ admin?: boolean }>()
 const message = useMessage()
+const dialog = useDialog()
 const invites = ref<Invite[]>([])
 const loading = ref(false)
 const show = ref(false)
@@ -53,9 +56,17 @@ async function setEnabled(i: Invite, v: boolean) {
   i.disabled = !v
 }
 
-async function remove(i: Invite) {
-  await inviteApi.remove(i.id)
-  load()
+function remove(i: Invite) {
+  dialog.warning({
+    title: t('删除邀请码'),
+    content: t('确定删除邀请码「{0}」？删除后无法再用它注册。', [i.code]),
+    positiveText: t('删除'),
+    negativeText: t('取消'),
+    onPositiveClick: async () => {
+      await inviteApi.remove(i.id)
+      load()
+    },
+  })
 }
 
 function status(i: Invite) {
@@ -144,7 +155,7 @@ const columns = computed(() => (isMobile.value ? mobileCols : desktopColumns))
         <n-input v-model:value="form.note" :placeholder="t('备注（可选）')" />
       </n-space>
       <template #footer>
-        <n-space justify="end"><n-button type="primary" @click="create">{{ t('生成') }}</n-button></n-space>
+        <n-space justify="end"><n-button type="primary" :loading="busy.is('create')" @click="busy.run('create', create)">{{ t('生成') }}</n-button></n-space>
       </template>
     </n-modal>
   </div>

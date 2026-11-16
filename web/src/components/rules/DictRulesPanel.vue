@@ -13,9 +13,11 @@ import type { DictRule } from '@/api/types'
 import { downloadText } from '@/utils/media'
 import DictModal from '@/components/DictModal.vue'
 import { t } from '@/i18n'
+import { useBusy } from '@/composables/useBusy'
 
 /** 字典规则：正文选中文字后“字典”使用的规则，与阅读 App 的字典规则格式相同 */
 /** 网址规则里代表查询文字的变量 */
+const busy = useBusy()
 const KEY_VAR = '{{key}}'
 const message = useMessage()
 const dialog = useDialog()
@@ -260,7 +262,7 @@ const columns = computed<DataTableColumns<DictRule>>(() => isMobile.value ? mobi
     <n-modal v-model:show="showImport" preset="card" :title="t('导入字典规则')" style="width: 560px; max-width: 94vw">
       <n-input v-model:value="importText" type="textarea" :autosize="{ minRows: 8, maxRows: 16 }" :placeholder="t('粘贴字典规则 JSON（数组或单个规则），同名规则会被覆盖')" class="mono" />
       <template #footer>
-        <n-space justify="end"><n-button type="primary" @click="doImport">{{ t('导入') }}</n-button></n-space>
+        <n-space justify="end"><n-button type="primary" :loading="busy.is('doImport')" @click="busy.run('doImport', doImport)">{{ t('导入') }}</n-button></n-space>
       </template>
     </n-modal>
 

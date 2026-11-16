@@ -1,3 +1,9 @@
+<script lang="ts">
+import type { SearchBook as CachedBook } from '@/api/types'
+/** 搜过的书（按书名，模块级）：同一次打开网页内再次换封面直接显示上次的结果，不用重新搜所有书源 */
+const cache = new Map<string, CachedBook[]>()
+</script>
+
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { NButton, NEmpty, NModal, NProgress, NSwitch, useMessage } from 'naive-ui'
@@ -36,12 +42,17 @@ const covers = computed(() => {
 })
 
 watch(show, (v) => {
-  if (v) start()
-  else controller?.abort()
+  if (!v) return controller?.abort()
+  const cached = props.book && cache.get(props.book.name)
+  if (cached) {
+    results.value = cached
+    searching.value = false
+  } else start()
 })
 
 async function start() {
   if (!props.book) return
+  const name = props.book.name
   controller?.abort()
   controller = new AbortController()
   results.value = []
@@ -56,6 +67,7 @@ async function start() {
       },
       controller.signal,
     )
+    cache.set(name, results.value)
   } catch (e: any) {
     if (e.name !== 'AbortError') message.error(e.message)
   } finally {

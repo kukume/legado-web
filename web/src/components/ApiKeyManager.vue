@@ -7,7 +7,9 @@ import {
 import { apiKeyApi, type ApiKeyInfo } from '@/api'
 import { copyText, formatDate, formatTime } from '@/utils/media'
 import { t } from '@/i18n'
+import { useBusy } from '@/composables/useBusy'
 
+const busy = useBusy()
 const message = useMessage()
 const dialog = useDialog()
 
@@ -95,7 +97,7 @@ const columns: DataTableColumns<ApiKeyInfo> = [
     <n-modal v-model:show="showCreate" preset="card" :title="t('生成 API Key')" style="max-width: 420px">
       <n-input v-model:value="newName" :placeholder="t('名称，例如：阅读插件')" maxlength="64" @keyup.enter="create" />
       <template #footer>
-        <n-space justify="end"><n-button type="primary" @click="create">{{ t('生成') }}</n-button></n-space>
+        <n-space justify="end"><n-button type="primary" :loading="busy.is('create')" @click="busy.run('create', create)">{{ t('生成') }}</n-button></n-space>
       </template>
     </n-modal>
 

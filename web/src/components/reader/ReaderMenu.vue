@@ -42,7 +42,7 @@ defineEmits<{
 <template>
   <transition name="slide-down">
     <header v-if="visible" class="topbar">
-      <n-button quaternary circle @click="$emit('back')">
+      <n-button quaternary circle :title="t('返回')" :aria-label="t('返回')" @click="$emit('back')">
         <template #icon><n-icon :component="ArrowBackOutline" /></template>
       </n-button>
       <div class="top-title">

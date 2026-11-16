@@ -370,7 +370,7 @@ function back() {
 <template>
   <div class="listen">
     <header class="bar">
-      <n-button quaternary circle @click="back">
+      <n-button quaternary circle :title="t('返回')" :aria-label="t('返回')" @click="back">
         <template #icon><n-icon :component="ArrowBackOutline" /></template>
       </n-button>
       <div class="bar-title ellipsis">{{ book?.name }}</div>

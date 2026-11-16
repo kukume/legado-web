@@ -10,6 +10,7 @@ import { useRouter } from 'vue-router'
 import { onUnauthorized } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
 import AppShellHelper from '@/components/AppShellHelper.vue'
+import GlobalErrorReporter from '@/components/GlobalErrorReporter.vue'
 import SourceBrowserBridge from '@/components/SourceBrowserBridge.vue'
 
 const ui = useUiStore()
@@ -56,6 +57,7 @@ const overrides = computed<GlobalThemeOverrides>(() => {
           <n-message-provider>
             <router-view />
             <app-shell-helper />
+            <global-error-reporter />
             <source-browser-bridge v-if="auth.loggedIn" />
           </n-message-provider>
         </n-notification-provider>
