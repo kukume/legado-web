@@ -69,7 +69,8 @@ fun Route.zlibraryRoutes(service: ZLibraryService) {
             call.respond(service.startDownload(call.user, book, req.groupId))
         }
         get("/api/zlib/downloads") {
-            call.respond(service.jobs(call.user))
+            // 失败原因在后台生成（没有请求的语言），返回时按界面语言翻译
+            call.respond(service.jobs(call.user).map { j -> j.error?.let { j.copy(error = io.legado.web.i18n.Messages.translate(call, it)) } ?: j })
         }
     }
 }

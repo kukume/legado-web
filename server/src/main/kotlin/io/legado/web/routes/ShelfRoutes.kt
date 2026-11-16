@@ -93,7 +93,7 @@ fun Route.shelfRoutes(
                 val books = shelfService.shelf(u).filter { it.canUpdate && !it.isLocal }
                 // 同一用户同时只跑一次（连续点击不会重复更新整个书架），几本书一起更新
                 if (!refreshingUsers.add(u.id)) {
-                    call.respond(OkResponse(message = "书架正在更新中"))
+                    call.respond(OkResponse(message = io.legado.web.i18n.Messages.translate(call, "书架正在更新中")))
                     return@post
                 }
                 backgroundScope.launch {
@@ -108,7 +108,7 @@ fun Route.shelfRoutes(
                         refreshingUsers.remove(u.id)
                     }
                 }
-                call.respond(OkResponse(message = "已开始更新 ${books.size} 本书"))
+                call.respond(OkResponse(message = io.legado.web.i18n.Messages.translate(call, "已开始更新 ${books.size} 本书")))
             }
             get("/{id}") { call.respond(shelfService.getBook(call.user, call.longParam("id"))) }
             patch("/{id}") {
@@ -173,7 +173,13 @@ fun Route.shelfRoutes(
                     }
                     val pages = call.request.queryParameters["pages"]?.toIntOrNull()
                     // zip 压缩包（按文件头判断）解压后逐本导入，返回 { archive: true, books, skipped }
-                    call.respond(localBookService.importUpload(u, tmp, name, io.legado.web.service.LocalBookService.ImportOptions(groupId, pdfPages = pages)))
+                    val result = localBookService.importUpload(u, tmp, name, io.legado.web.service.LocalBookService.ImportOptions(groupId, pdfPages = pages))
+                    // 压缩包里跳过的文件：原因按界面语言翻译
+                    call.respond(
+                        if (result is io.legado.web.service.LocalBookService.ArchiveImportResult) {
+                            result.copy(skipped = result.skipped.map { it.copy(reason = io.legado.web.i18n.Messages.translate(call, it.reason)) })
+                        } else result,
+                    )
                 } finally {
                     tmp.delete()
                 }
@@ -244,14 +250,14 @@ fun Route.shelfRoutes(
                 val applied = shelfService.saveProgress(
                     call.user, call.longParam("id"), req.index, req.pos, req.title, req.time, call.request.headers["X-Client-Id"],
                 )
-                call.respond(OkResponse(message = if (applied) null else "服务器上的进度更新，已忽略"))
+                call.respond(OkResponse(message = if (applied) null else io.legado.web.i18n.Messages.translate(call, "服务器上的进度更新，已忽略")))
             }
             post("/{id}/cache") {
                 val req = call.receive<CacheRequest>()
                 val u = call.user
                 val id = call.longParam("id")
                 backgroundScope.launch { shelfService.cacheChapters(u, id, req.start, req.count) }
-                call.respond(OkResponse(message = "已开始缓存"))
+                call.respond(OkResponse(message = io.legado.web.i18n.Messages.translate(call, "已开始缓存")))
             }
             delete("/{id}/cache") {
                 shelfService.clearCache(call.user, call.longParam("id"))

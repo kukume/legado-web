@@ -159,10 +159,19 @@ class ZipBookExtractor(
                         skipped += Skipped(name, reason)
                     }
                 } finally {
-                    tmp.delete()
+                    deleteTemp(tmp)
                 }
             }
         }
         return skipped
+    }
+
+    /** 删除临时文件。Windows 上杀毒软件扫描刚写入的文件时会短暂占用，删不掉就稍等重试，仍失败则退出时删除 */
+    private fun deleteTemp(f: File) {
+        repeat(5) {
+            if (f.delete() || !f.exists()) return
+            Thread.sleep(100)
+        }
+        f.deleteOnExit()
     }
 }

@@ -150,7 +150,7 @@ class LocalBookService(
                 if (books.isEmpty()) {
                     throw BadRequestException(
                         if (skipped.isEmpty()) "压缩包里没有可导入的书籍（支持 EPUB、TXT、MOBI、AZW3、AZW、UMD）"
-                        else "压缩包里的书都没能导入：" + skipped.take(3).joinToString("；") { "${it.name}（${it.reason}）" }
+                        else "压缩包里的书都没能导入：${skipped.take(3).joinToString("；") { "${it.name}（${it.reason}）" }}"
                     )
                 }
                 ArchiveImportResult(books = books, skipped = skipped)
