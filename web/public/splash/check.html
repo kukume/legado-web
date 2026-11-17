@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex" />
+<title>启动图检查</title>
+<style>
+  :root { color-scheme: light dark; --bg: #f6f1e7; --fg: #2b2620; --muted: #7a6f60; --ok: #2e7d32; --bad: #c62828; --card: #fffaf1; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #16140f; --fg: #e8e0d2; --muted: #a39886; --ok: #81c784; --bad: #ef9a9a; --card: #221e17; } }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 15px/1.6 -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif; }
+  h1 { font-size: 18px; margin: 0 0 12px; }
+  .card { background: var(--card); border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; }
+  .row { display: flex; justify-content: space-between; gap: 12px; }
+  .k { color: var(--muted); }
+  .ok { color: var(--ok); font-weight: 600; }
+  .bad { color: var(--bad); font-weight: 600; }
+  code { font-size: 12px; word-break: break-all; }
+  img { display: block; max-width: 120px; margin-top: 8px; border-radius: 6px; border: 1px solid rgba(0,0,0,.1); }
+</style>
+</head>
+<body>
+<h1>iOS 启动图检查</h1>
+<p class="k">请用你添加主屏幕图标时用的浏览器（Safari 或 Chrome）打开这个页面，不要从主屏幕图标打开，截图这一页即可。</p>
+<div id="out">检查中…</div>
+<script>
+(async function () {
+  var out = document.getElementById('out')
+  function row(k, v, cls) { return '<div class="row"><span class="k">' + k + '</span><span class="' + (cls || '') + '">' + v + '</span></div>' }
+  var html = ''
+  var dark = matchMedia('(prefers-color-scheme: dark)').matches
+  html += '<div class="card">' +
+    row('屏幕（CSS 像素）', screen.width + ' × ' + screen.height) +
+    row('像素比', devicePixelRatio) +
+    row('方向', matchMedia('(orientation: portrait)').matches ? '竖屏' : '横屏') +
+    row('系统外观', dark ? '深色' : '浅色') +
+    row('主屏幕模式打开', navigator.standalone ? '是（请改用浏览器打开）' : '否', navigator.standalone ? 'bad' : '') +
+    row('离线缓存（Service Worker）', navigator.serviceWorker && navigator.serviceWorker.controller ? '已启用' : '未启用') +
+    '</div>'
+
+  // 1. 服务器上的最新首页（绕过离线缓存）里有没有启动图链接
+  var latest = []
+  try {
+    var text = await (await fetch('/index.html?splash-check=' + Date.now(), { cache: 'no-store' })).text()
+    var doc = new DOMParser().parseFromString(text, 'text/html')
+    latest = Array.prototype.slice.call(doc.querySelectorAll('link[rel="apple-touch-startup-image"]'))
+  } catch (e) {}
+  html += '<div class="card">' + row('服务器上的首页', latest.length ? latest.length + ' 个启动图链接' : '没有启动图链接', latest.length ? 'ok' : 'bad') + '</div>'
+
+  // 2. Safari 实际会用的首页（可能来自离线缓存）里有没有
+  var cached = -1
+  try {
+    var t2 = await (await fetch('/', { cache: 'default' })).text()
+    cached = (t2.match(/apple-touch-startup-image/g) || []).length
+  } catch (e) {}
+  if (cached >= 0) {
+    var stale = latest.length > 0 && cached === 0
+    html += '<div class="card">' + row('浏览器打开首页时拿到的版本', cached ? cached + ' 个启动图链接' : '没有启动图链接（旧版本）', stale ? 'bad' : cached ? 'ok' : '') +
+      (stale ? '<p class="bad">浏览器用的是离线缓存里的旧页面，添加到主屏幕时读不到启动图。请清除这个浏览器里本站的数据（Safari：设置 → App → Safari → 高级 → 网站数据；Chrome：Chrome 设置 → 隐私和安全 → 清除浏览数据，勾选 Cookie 和网站数据、缓存的图片和文件），再打开首页重新添加到主屏幕。</p>' : '') +
+      '</div>'
+  }
+
+  // 3. 当前设备匹配哪一张
+  var hit = latest.filter(function (l) { return matchMedia(l.getAttribute('media')).matches })
+  var noScheme = latest.filter(function (l) {
+    return matchMedia(l.getAttribute('media').replace(/\s*and\s*\(prefers-color-scheme:\s*\w+\)/, '')).matches
+  })
+  html += '<div class="card">'
+  if (hit.length) {
+    html += row('匹配的启动图', hit.length + ' 张', 'ok') + hit.map(function (l) {
+      var href = l.getAttribute('href')
+      return '<code>' + href + '</code><img src="' + href + '" alt="">'
+    }).join('')
+  } else {
+    html += row('匹配的启动图', '没有', 'bad')
+    html += '<p>' + (noScheme.length
+      ? '去掉浅色 / 深色条件后能匹配 ' + noScheme.length + ' 张：问题出在 prefers-color-scheme 条件。'
+      : '尺寸都对不上：可能是没有这个机型的尺寸，或者开启了“显示缩放”、浏览器的隐私保护伪装了屏幕尺寸。') + '</p>'
+  }
+  html += '</div>'
+  out.innerHTML = html
+})()
+</script>
+</body>
+</html>

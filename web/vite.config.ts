@@ -86,9 +86,9 @@ export default defineConfig({
         // iOS 启动图只在添加到主屏幕时读取，不预缓存
         globIgnores: ['**/hls-*.js', 'pdfjs/**', 'splash/**'],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
-        // 页面路由离线时回退到 index.html；接口和开放接口文档不走回退
+        // 页面路由离线时回退到 index.html；接口、开放接口文档和启动图检查页（splash/check.html）不走回退
         navigateFallback: '/index.html',
-        navigateFallbackDenylist: [/^\/api\//, /^\/openapi\//],
+        navigateFallbackDenylist: [/^\/api\//, /^\/openapi\//, /^\/splash\//],
         cleanupOutdatedCaches: true,
         runtimeCaching: [
           {
