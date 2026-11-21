@@ -29,9 +29,7 @@ object EncodingDetect {
             var charsetStr: String
             for (metaTag in metaTags) {
                 charsetStr = metaTag.attr("charset")
-                if (!charsetStr.isNullOrEmpty()) {
-                    return charsetStr
-                }
+                validCharset(charsetStr)?.let { return it }
                 val httpEquiv = metaTag.attr("http-equiv")
                 if (httpEquiv.equals("content-type", true)) {
                     val content = metaTag.attr("content")
@@ -41,14 +39,22 @@ object EncodingDetect {
                     } else {
                         content.substringAfter(";")
                     }
-                    if (!charsetStr.isNullOrEmpty()) {
-                        return charsetStr
-                    }
+                    validCharset(charsetStr)?.let { return it }
                 }
             }
         } catch (ignored: Exception) {
         }
         return getEncode(bytes)
+    }
+
+    /**
+     * 网页里写的编码名：去掉引号、反斜杠、空白和后面的参数；不是 JVM 支持的编码时返回 null（改为按内容检测）。
+     * 例如 JSON 字符串里转义过的 charset=\"utf-8\" 会被解析成 \"utf-8\"
+     */
+    internal fun validCharset(raw: String?): String? {
+        val name = raw?.trim()?.trim('\\', '"', '\'', ' ')?.substringBefore(';')?.trim()
+        if (name.isNullOrEmpty()) return null
+        return name.takeIf { runCatching { java.nio.charset.Charset.isSupported(it) }.getOrDefault(false) }
     }
 
     fun getEncode(bytes: ByteArray): String {

@@ -90,9 +90,17 @@ fun ResponseBody.text(encode: String? = null): String {
         return String(responseBytes, charset)
     }
 
-    //根据内容判断
+    // JSON 没有声明编码时按标准就是 UTF-8。不能按网页的 <meta charset> 猜：
+    // 书源合集等 JSON 的字符串里常含有 HTML 片段（如 charset=\"utf-8\"），会被误当成编码名
+    if (contentType()?.subtype?.contains("json", ignoreCase = true) == true) {
+        return String(responseBytes, Charsets.UTF_8)
+    }
+
+    //根据内容判断；猜出的编码名无效时按内容检测，不抛异常
     charsetName = EncodingDetect.getHtmlEncode(responseBytes)
-    return String(responseBytes, Charset.forName(charsetName))
+    val charset = runCatching { Charset.forName(charsetName) }.getOrNull()
+        ?: runCatching { Charset.forName(EncodingDetect.getEncode(responseBytes)) }.getOrDefault(Charsets.UTF_8)
+    return String(responseBytes, charset)
 }
 
 fun ResponseBody.decompressed(): ResponseBody {

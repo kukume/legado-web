@@ -52,8 +52,10 @@ class SubscriptionService(private val sourceService: SourceService) {
             }
     }
 
-    suspend fun create(user: UserPrincipal, name: String, url: String, isPublic: Boolean, autoUpdate: Boolean): Long {
+    suspend fun create(user: UserPrincipal, name: String, rawUrl: String, isPublic: Boolean, autoUpdate: Boolean): Long {
         if (!sourceService.canAddSource(user)) throw ForbiddenException("管理员未开放用户添加书源")
+        // App 的一键导入链接（yuedu://booksource/importonline?src=...）保存为其中真正的地址
+        val url = resolveImportUrl(rawUrl)
         if (!url.startsWith("http")) throw BadRequestException("订阅链接无效")
         val id = dbQuery {
             SourceSubscriptions.insertAndGetId {

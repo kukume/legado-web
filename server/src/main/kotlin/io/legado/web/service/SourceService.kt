@@ -57,6 +57,27 @@ data class SourceSummary(
     val lastUpdateTime: Long,
 )
 
+/**
+ * 阅读 App 的一键导入链接，如 yuedu://booksource/importonline?src=https%3A%2F%2Fexample.com%2Fa.json
+ * （也有 legado:// 开头的），取出 src 里真正的地址；src 可能经过一次或多次 URL 编码，也可能没编码。
+ * src 没编码时里面的 & 属于地址本身，所以取 src= 之后的全部内容，不按参数拆分。
+ * 不是这种链接时原样返回
+ */
+internal fun resolveImportUrl(raw: String): String {
+    val url = raw.trim()
+    val scheme = url.substringBefore("://", "").lowercase()
+    if (scheme != "yuedu" && scheme != "legado") return url
+    val query = url.substringAfter('?', "")
+    val at = Regex("(?:^|&)src=", RegexOption.IGNORE_CASE).find(query) ?: return url
+    var src = query.substring(at.range.last + 1).substringBefore('#').trim()
+    // 编码过的地址不以 http:// 开头（http%3A%2F%2F…）：解码到出现 http 为止，最多三次
+    repeat(3) {
+        if (src.startsWith("http://", true) || src.startsWith("https://", true) || !src.contains('%')) return src
+        src = runCatching { java.net.URLDecoder.decode(src.replace("+", "%2B"), Charsets.UTF_8) }.getOrElse { return src }
+    }
+    return src
+}
+
 /** 带数据库 id 的书源 */
 data class StoredSource(val id: Long, val ownerId: Long, val isPublic: Boolean, val source: BookSource)
 
@@ -213,7 +234,8 @@ class SourceService(
         return list.filter { it.bookSourceUrl.isNotBlank() && it.bookSourceName.isNotBlank() }
     }
 
-    suspend fun fetchText(url: String): String {
+    suspend fun fetchText(rawUrl: String): String {
+        val url = resolveImportUrl(rawUrl)
         if (!url.isAbsUrl()) throw BadRequestException("链接无效")
         val res = okHttpClient.newCallStrResponse { url(url) }
         if (!res.isSuccessful()) throw BadRequestException("下载失败: HTTP ${res.code()}")
