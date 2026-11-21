@@ -39,7 +39,7 @@ docker run -d --name legado-web -p 8955:8080 -v ./data:/data -e TZ=Asia/Shanghai
 
 ### 本地开发
 
-需要 JDK 21、Node 22.12+。
+需要 JDK 25、Node 22.12+。
 
 ```bash
 # 后端（开发时用 18080 端口，与前端代理一致；数据在 ./data）

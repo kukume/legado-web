@@ -42,7 +42,8 @@ services:
   #   image: cloakhq/cloakbrowser
   #   container_name: browser
   #   command: cloakserve
-  #   # environment:
+  #   environment:
+  #     CLOAKBROWSER_LICENSE_KEY:
   #   restart: unless-stopped
   #   networks:
   #     - legado-network

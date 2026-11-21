@@ -12,7 +12,7 @@ application {
 }
 
 kotlin {
-    jvmToolchain(21)
+    jvmToolchain(25)
 }
 
 dependencies {
@@ -44,6 +44,17 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
+}
+
+// SQLite 驱动用 JNI 加载原生库：JDK 24 起需要允许原生访问，否则启动时警告，将来的版本会直接禁止。
+// 写在 jar 的清单里，java -jar 启动时生效（Docker、手动运行都不用另加参数）
+tasks.withType<Jar>().configureEach {
+    manifest { attributes("Enable-Native-Access" to "ALL-UNNAMED") }
+}
+
+application {
+    applicationDefaultJvmArgs = listOf("--enable-native-access=ALL-UNNAMED")
 }
 
 ktor {

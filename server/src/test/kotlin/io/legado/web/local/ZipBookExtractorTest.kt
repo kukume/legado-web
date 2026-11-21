@@ -34,6 +34,19 @@ class ZipBookExtractorTest {
         putNextEntry(ZipEntry(name)); write(bytes); closeEntry()
     }
 
+    /**
+     * 工作目录是否已清空。Windows 上文件被其它进程（杀毒软件扫描刚写入的文件）短暂打开时，
+     * delete() 返回成功但文件要等对方关闭后才真正消失，所以稍等一会儿再判断
+     */
+    private fun workIsEmpty(): Boolean {
+        val deadline = System.currentTimeMillis() + 3000
+        while (true) {
+            if (work.listFiles().isNullOrEmpty()) return true
+            if (System.currentTimeMillis() > deadline) return false
+            Thread.sleep(50)
+        }
+    }
+
     private class Got(val name: String, val parent: File, val size: Long)
 
     private fun run(archive: File, maxFile: Long = 50L * 1024 * 1024, maxTotal: Long = 1024L * 1024 * 1024): Pair<List<Got>, List<ZipBookExtractor.Skipped>> {
@@ -60,7 +73,7 @@ class ZipBookExtractorTest {
         assertFalse(File(base, "evil.txt").exists() || File(base.parentFile, "evil.txt").exists())
         assertTrue(base.walkTopDown().none { it.name.startsWith("evil") }, "不应出现以包内文件名命名的文件")
         // 回调后临时文件已删除
-        assertTrue(work.listFiles().isNullOrEmpty())
+        assertTrue(workIsEmpty())
     }
 
     @Test fun zipBombIsStopped() {
@@ -76,7 +89,7 @@ class ZipBookExtractorTest {
         val (got, skipped) = run(archive)
         assertEquals(listOf("ok.txt"), got.map { it.name })
         assertTrue(skipped.single { it.name == "bomb.txt" }.reason.let { "压缩比" in it || "过大" in it })
-        assertTrue(work.listFiles().isNullOrEmpty(), "炸弹的部分解压文件也要删除")
+        assertTrue(workIsEmpty(), "炸弹的部分解压文件也要删除，剩下：${work.listFiles()?.map { "${it.name} ${it.length()}B" }}")
     }
 
     @Test fun perFileAndTotalLimits() {

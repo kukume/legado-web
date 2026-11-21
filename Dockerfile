@@ -11,7 +11,7 @@ RUN chmod -R a+x node_modules/.bin || true
 RUN npm run build:fast
 
 # ---------- 后端 ----------
-FROM --platform=$BUILDPLATFORM gradle:9-jdk21 AS server
+FROM --platform=$BUILDPLATFORM gradle:9-jdk25 AS server
 WORKDIR /src
 COPY settings.gradle.kts build.gradle.kts gradle.properties ./
 # 依赖版本目录（libs.versions.toml）
@@ -22,7 +22,7 @@ COPY --from=web /web/dist ./server/src/main/resources/static
 RUN gradle :server:buildFatJar --no-daemon -q
 
 # ---------- 运行 ----------
-FROM eclipse-temurin:21-jre
+FROM eclipse-temurin:25-jre
 # 镜像里不带浏览器：webView:true 的书源、远程浏览器需要浏览器时，另外启动一个浏览器容器，
 # 在后台“系统设置”中填写它的调试地址（见 docker-compose.yml 中的 browser 服务）
 WORKDIR /app
