@@ -2,25 +2,31 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { NDrawer, NDrawerContent, NInput, NTab, NTabs, NVirtualList } from 'naive-ui'
 import BookmarkList from '@/components/BookmarkList.vue'
+import HighlightList from './HighlightList.vue'
 import BookSearchPanel from '@/components/BookSearchPanel.vue'
-import type { Bookmark, BookSearchHit, Chapter } from '@/api/types'
+import type { Bookmark, BookHighlight, BookSearchHit, Chapter } from '@/api/types'
 import { t } from '@/i18n'
 
-/** 阅读页左侧抽屉：目录、书签、书内搜索 */
+/** 阅读页左侧抽屉：目录、书签、标注、书内搜索 */
 const props = defineProps<{
   bookId: number
   isLocal: boolean
   chapters: Chapter[]
   curIndex: number
+  /** 本书的手动标注（由阅读页读取，添加、修改后这里同步显示） */
+  highlights: BookHighlight[]
 }>()
 const show = defineModel<boolean>('show', { default: false })
 defineEmits<{
   go: [index: number]
   jumpBookmark: [b: Bookmark]
+  jumpHighlight: [h: BookHighlight]
+  noteHighlight: [h: BookHighlight]
+  removeHighlight: [h: BookHighlight]
   jumpSearch: [hit: BookSearchHit, keyword: string]
 }>()
 
-const tab = ref<'toc' | 'bookmark' | 'search'>('toc')
+const tab = ref<'toc' | 'bookmark' | 'highlight' | 'search'>('toc')
 /** 搜索页打开过之后保留（只隐藏），切换标签不丢失搜索结果 */
 const searchOpened = ref(false)
 watch(tab, (v) => {
@@ -71,14 +77,22 @@ defineExpose({
   <n-drawer v-model:show="show" :width="360" placement="left" style="max-width: 88vw" :auto-focus="false" display-directive="show" @after-enter="scrollToCurrent">
     <n-drawer-content :native-scrollbar="false" body-content-style="padding: 0">
       <template #header>
-        <n-tabs v-model:value="tab" type="segment" size="small" style="width: 260px" animated>
+        <n-tabs v-model:value="tab" type="segment" size="small" style="width: 300px; max-width: 100%" animated>
           <n-tab name="toc">{{ t('目录（{0}）', [chapters.length]) }}</n-tab>
           <n-tab name="bookmark">{{ t('书签') }}</n-tab>
+          <n-tab name="highlight">{{ t('标注') }}</n-tab>
           <n-tab name="search">{{ t('搜索') }}</n-tab>
         </n-tabs>
       </template>
       <book-search-panel v-if="searchOpened" v-show="tab === 'search'" :book-id="bookId" :is-local="isLocal" @jump="(h: BookSearchHit, k: string) => $emit('jumpSearch', h, k)" />
       <bookmark-list v-if="tab === 'bookmark'" ref="bookmarkList" :book-id="bookId" :active="show && tab === 'bookmark'" @jump="(b: Bookmark) => $emit('jumpBookmark', b)" />
+      <highlight-list
+        v-if="tab === 'highlight'"
+        :list="highlights"
+        @jump="(h: BookHighlight) => $emit('jumpHighlight', h)"
+        @note="(h: BookHighlight) => $emit('noteHighlight', h)"
+        @remove="(h: BookHighlight) => $emit('removeHighlight', h)"
+      />
       <!-- 目录列表切到书签时只隐藏不销毁：重新创建的虚拟列表要等测量后才渲染，切回来会是空的 -->
       <div v-show="tab === 'toc'">
         <div style="padding: 8px 12px">

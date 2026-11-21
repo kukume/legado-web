@@ -30,6 +30,13 @@ defineEmits<{
 const readerStore = useReaderStore()
 const cfg = computed(() => readerStore.config)
 const customThemes = computed(() => cfg.value.customThemes ?? [])
+/** 点哪种方式打开手动标注的菜单（长按在电脑上是右键） */
+const triggerOptions = computed(() => [
+  { value: 'click', label: t('点击') },
+  { value: 'dblclick', label: t('双击') },
+  { value: 'longpress', label: t('长按 / 右键') },
+  { value: 'off', label: t('关闭') },
+])
 
 // ---------------- 字体：预设字体 + 用户上传的字体 ----------------
 
@@ -223,6 +230,15 @@ function removeFont(f: UserFont) {
           <div class="set-row">
             <label>{{ t('替换净化') }}</label>
             <n-switch :value="processing.useReplaceRule" @update:value="(v: boolean) => $emit('process', 'useReplaceRule', v)" />
+          </div>
+          <div class="set-row">
+            <label>{{ t('高亮规则') }}</label>
+            <n-switch :value="cfg.highlight !== false" @update:value="(v: boolean) => (cfg.highlight = v)" />
+          </div>
+          <div class="set-row">
+            <label>{{ t('标注操作唤起方式') }}</label>
+            <n-select size="small" style="width: 120px" :value="cfg.highlightTrigger ?? 'click'" :options="triggerOptions"
+              @update:value="(v: 'click' | 'dblclick' | 'longpress' | 'off') => (cfg.highlightTrigger = v)" />
           </div>
           <div class="set-row">
             <label>{{ t('删除重复标题') }}</label>

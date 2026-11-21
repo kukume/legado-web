@@ -2,7 +2,7 @@
 import { goBack } from '@/utils/navigation'
 import { useIsMobile } from '@/composables/useIsMobile'
 import { computed, onMounted, ref, watch } from 'vue'
-import { isNetworkError } from '@/api/http'
+import { deviceOffline, isNetworkError } from '@/api/http'
 import { offlineContentIndexes } from '@/offline/db'
 import { useOfflineStore } from '@/stores/offline'
 import { useRoute, useRouter } from 'vue-router'
@@ -62,7 +62,7 @@ async function load() {
       chapters.value = local.chapters
       offlineMode.value = true
     } else {
-      message.error(isNetworkError(e) ? t('当前离线，这本书还没有离线下载') : e.message)
+      message.error(isNetworkError(e) ? (deviceOffline() ? t('当前离线，这本书还没有离线下载') : t('连不上服务器，这本书也还没有离线下载')) : e.message)
     }
   } finally {
     loadOfflineIndexes()

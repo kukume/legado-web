@@ -5,6 +5,22 @@ import { pdfPageOf } from '@/utils/pdf'
 import PdfPage from './PdfPage.vue'
 import type { Segment } from './types'
 import { t } from '@/i18n'
+import { h, type FunctionalComponent, type PropType } from 'vue'
+import { shiftMarks, type Highlighter, type Mark } from '@/utils/highlight'
+import type { InlinePart } from '@/utils/content'
+
+/**
+ * 一段文字：有高亮规则匹配或手动标注时把这些部分包在 span 里，否则就是文字本身。
+ * 手动标注的 span 带 data-mark（标注 id），点击时打开标注的操作菜单
+ */
+const HlText: FunctionalComponent<{ text: string; hl?: Highlighter | null; title?: boolean; marks?: Mark[] }> = (props) => {
+  const parts = props.hl?.(props.text, props.title, props.marks)
+  if (!parts) return props.text
+  return parts.map((p) =>
+    p.style ? h('span', { class: p.mark !== undefined ? 'hl hl-mark' : 'hl', style: p.style, 'data-mark': p.mark }, p.text) : p.text,
+  )
+}
+HlText.props = { text: String, hl: Function as unknown as PropType<Highlighter | null>, title: Boolean, marks: Array as PropType<Mark[]> }
 
 /**
  * 一章的正文：章节名、加载中 / 失败提示、段落和图片、段评数量。
@@ -12,7 +28,7 @@ import { t } from '@/i18n'
  * 多个根节点（不包一层元素）：上下翻页按正文容器的直接子元素逐行计算分页，
  * 朗读、书签按 data-para="章-段" 查找段落。
  */
-defineProps<{
+const props = defineProps<{
   seg: Segment
   reviewCount: (index: number, pn: number) => number
   fmtReview: (n: number) => string
@@ -21,7 +37,24 @@ defineProps<{
   scrollMode?: boolean
   /** PDF 本地书：正文里的 pdfpage:N 由浏览器渲染 */
   pdfBookId?: number
+  /** 高亮规则（没有可用的规则或已关闭时为空） */
+  hl?: Highlighter | null
+  /** 本章的手动标注，按段落序号分组（位置是段内偏移，见 utils/highlight 的 layoutMarks） */
+  marks?: Map<number, Mark[]>
 }>()
+
+/** 段内有小图时文字分成几块：每块对应的标注 */
+function partMarks(i: number, parts: InlinePart[], j: number): Mark[] | undefined {
+  const m = props.marks?.get(i)
+  if (!m) return undefined
+  let off = 0
+  for (let k = 0; k < j; k++) {
+    const pk = parts[k]
+    if ('text' in pk) off += pk.text.length
+  }
+  const pj = parts[j]
+  return 'text' in pj ? shiftMarks(m, off, pj.text.length) : undefined
+}
 
 defineEmits<{
   /** 打开段评（pn 为 -1 时是本章说） */
@@ -35,7 +68,7 @@ defineEmits<{
 </script>
 
 <template>
-  <h2 class="chapter-title">{{ seg.title }}<span v-if="reviewCount(seg.index, -1)" class="review-badge title" @click.stop="$emit('review', -1)">{{ t('本章说 {0}', [fmtReview(reviewCount(seg.index, -1))]) }}</span></h2>
+  <h2 class="chapter-title"><hl-text :text="seg.title" :hl="hl" title /><span v-if="reviewCount(seg.index, -1)" class="review-badge title" @click.stop="$emit('review', -1)">{{ t('本章说 {0}', [fmtReview(reviewCount(seg.index, -1))]) }}</span></h2>
   <div v-if="seg.loading" class="center small-pad"><n-spin size="small" /></div>
   <div v-else-if="seg.error" class="error">
     <p>{{ t('加载失败：{0}', [seg.error]) }}</p>
@@ -43,7 +76,7 @@ defineEmits<{
     <n-button v-if="scrollMode" size="small" @click.stop="$emit('changeSource')">{{ t('换源') }}</n-button>
   </div>
   <template v-for="(p, i) in seg.paras" :key="i">
-    <p v-if="p.type === 'text'" class="para" :data-para="`${seg.index}-${i}`"><template v-if="p.parts"><template v-for="(part, j) in p.parts" :key="j"><template v-if="'text' in part">{{ part.text }}</template><img v-else class="inline-img" :class="{ clickable: part.img.clickable }" :src="imgSrc(part.img.display)" alt="" @click="$emit('imgTap', $event, part.img)" /></template></template><template v-else>{{ p.text }}</template><span v-if="p.last && reviewCount(seg.index, p.pn)" class="review-badge" @click.stop="$emit('review', p.pn, p.text)">{{ fmtReview(reviewCount(seg.index, p.pn)) }}</span></p>
+    <p v-if="p.type === 'text'" class="para" :data-para="`${seg.index}-${i}`"><template v-if="p.parts"><template v-for="(part, j) in p.parts" :key="j"><hl-text v-if="'text' in part" :text="part.text" :hl="hl" :marks="partMarks(i, p.parts, j)" /><img v-else class="inline-img" :class="{ clickable: part.img.clickable }" :src="imgSrc(part.img.display)" alt="" @click="$emit('imgTap', $event, part.img)" /></template></template><hl-text v-else :text="p.text" :hl="hl" :marks="marks?.get(i)" /><span v-if="p.last && reviewCount(seg.index, p.pn)" class="review-badge" @click.stop="$emit('review', p.pn, p.text)">{{ fmtReview(reviewCount(seg.index, p.pn)) }}</span></p>
     <pdf-page
       v-else-if="pdfBookId && pdfPageOf(p.img.display) !== null"
       :book-id="pdfBookId"
@@ -90,6 +123,16 @@ defineEmits<{
   text-indent: var(--r-indent);
   text-align: justify;
   word-break: break-word;
+}
+
+/* 高亮规则匹配的文字（颜色等样式由规则决定，见 utils/highlight） */
+.hl-mark {
+  cursor: pointer;
+}
+
+.hl {
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 
 /* 朗读中的段落（由朗读逻辑加上 class） */

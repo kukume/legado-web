@@ -39,8 +39,14 @@ export function useTextSelection(opts: {
   /** 找不到段落时使用的章节序号 */
   fallbackChapter: () => number
 }) {
-  /** prefix：所在段落开头到选区起点的文字（从选中处开始朗读时用来定位） */
-  const selection = reactive({ show: false, text: '', x: 0, y: 0, chapter: -1, para: -1, prefix: '', paraTop: 0, segHeight: 0 })
+  /**
+   * prefix：所在段落开头到选区起点的文字（从选中处开始朗读时用来定位）；
+   * endChapter、endPara、endPrefix：选区终点所在的章节、段落和段落开头到终点的文字（添加标注时计算位置，不在段落里时为 -1）
+   */
+  const selection = reactive({
+    show: false, text: '', x: 0, y: 0, chapter: -1, para: -1, prefix: '', paraTop: 0, segHeight: 0,
+    endChapter: -1, endPara: -1, endPrefix: '',
+  })
   let timer: ReturnType<typeof setTimeout> | null = null
   /** 最近一次按下工具栏的时间：手机上点按钮时选区可能先被取消，这段时间内不隐藏工具栏 */
   let barPressedAt = 0
@@ -71,6 +77,19 @@ export function useTextSelection(opts: {
       pre.setStart(paraEl, 0)
       pre.setEnd(range.startContainer, range.startOffset)
       selection.prefix = pre.toString()
+    }
+    const endNode = range.endContainer
+    const endEl = (endNode.nodeType === Node.ELEMENT_NODE ? endNode : endNode.parentElement) as Element | null
+    const endParaEl = endEl?.closest('[data-para]') as HTMLElement | null
+    const [ec, ep] = (endParaEl?.dataset.para ?? '').split('-').map(Number)
+    selection.endChapter = Number.isFinite(ec) ? ec : -1
+    selection.endPara = Number.isFinite(ep) ? ep : -1
+    selection.endPrefix = ''
+    if (endParaEl) {
+      const pre = document.createRange()
+      pre.setStart(endParaEl, 0)
+      pre.setEnd(range.endContainer, range.endOffset)
+      selection.endPrefix = pre.toString()
     }
     const r = range.getBoundingClientRect()
     // 记录选中文字在本章中的位置（长段落也准确），用来计算书签的章内位置

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useIsMobile } from '@/composables/useIsMobile'
 import { mobileColumns, useSelectAll } from '@/utils/mobileTable'
-import { computed, h, onMounted, reactive, ref, watch } from 'vue'
+import { computed, h, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   NButton, NDataTable, NDropdown, NIcon, NInput, NModal, NSelect, NSpace, NSwitch, NTabs, NTabPane, NTag,
@@ -87,13 +87,28 @@ const pagination = reactive({
   pageSizes,
   onChange: (page: number) => {
     pagination.page = page
+    scrollToTable()
   },
   onUpdatePageSize: (size: number) => {
     pagination.pageSize = size
     pagination.page = 1
     localStorage.setItem(PAGE_SIZE_KEY, String(size))
+    scrollToTable()
   },
 })
+
+/**
+ * 翻页、切换每页条数后回到表格顶部：分页在表格下面，每页条数变少时页面一下子变短，
+ * 停在原来的滚动位置会跳到别处（看起来像整页重新加载）；翻页后也应该从新一页的第一条看起。
+ * 表格顶部还在屏幕里时不滚动
+ */
+const tableWrap = ref<HTMLElement | null>(null)
+function scrollToTable() {
+  nextTick(() => {
+    const top = tableWrap.value?.getBoundingClientRect().top
+    if (top !== undefined && top < 0) window.scrollBy({ top: top - 12 })
+  })
+}
 // 筛选条件变化后回到第一页（否则可能停在不存在的页上）
 watch([keyword, group, status], () => {
   pagination.page = 1
@@ -357,6 +372,19 @@ async function doImport() {
   }
 }
 
+/**
+ * 粘贴：内容较大（几百 KB 以上的书源合集）时不放进输入框，和选择文件一样只显示一行，
+ * 否则输入框要排版、测量几 MB 的文字，页面会卡死
+ */
+const LARGE_PASTE_CHARS = 100_000
+function onPaste(e: ClipboardEvent) {
+  const text = e.clipboardData?.getData('text/plain') ?? ''
+  if (text.length < LARGE_PASTE_CHARS) return
+  e.preventDefault()
+  importFile.value = { name: t('粘贴的内容'), size: new Blob([text]).size, text }
+  importText.value = ''
+}
+
 async function onFile(opts: { file: UploadFileInfo }) {
   const f = opts.file.file
   if (!f) return
@@ -464,18 +492,20 @@ const statusOptions = [
             <template #icon><n-icon :component="AddOutline" /></template>{{ t('新建') }}
           </n-button>
         </div>
-        <n-data-table
-          v-model:checked-row-keys="checked"
-          :columns="columns"
-          :data="filtered"
-          :row-key="(r: SourceSummary) => r.id"
-          :loading="loading"
-          :pagination="tablePagination"
-          size="small"
-          :class="{ 'm-table': isMobile }"
-          :scroll-x="isMobile ? undefined : 720"
-          :table-layout="isMobile ? 'fixed' : 'auto'"
-        />
+        <div ref="tableWrap">
+          <n-data-table
+            v-model:checked-row-keys="checked"
+            :columns="columns"
+            :data="filtered"
+            :row-key="(r: SourceSummary) => r.id"
+            :loading="loading"
+            :pagination="tablePagination"
+            size="small"
+            :class="{ 'm-table': isMobile }"
+            :scroll-x="isMobile ? undefined : 720"
+            :table-layout="isMobile ? 'fixed' : 'auto'"
+          />
+        </div>
       </n-tab-pane>
 
       <n-tab-pane name="subs" :tab="t('订阅 ({0})', [subs.length])">
@@ -514,7 +544,7 @@ const statusOptions = [
           <SourceImportPreview v-if="previewItems" v-model:selected="previewSelected" :items="previewItems" />
           <template v-else>
             <n-input v-model:value="importUrl" placeholder="https://example.com/bookSource.json" @keyup.enter="doImport" />
-            <p class="muted small">{{ t('支持阅读 3.0 书源 JSON（单个或数组）。下载后可以勾选要导入的书源。需要定期同步请使用“订阅”。') }}</p>
+            <p class="muted small">{{ t('支持阅读 3.0 书源 JSON（单个或数组），也可以直接粘贴 App 的一键导入链接（yuedu://booksource/importonline?src=…）。下载后可以勾选要导入的书源。需要定期同步请使用“订阅”。') }}</p>
           </template>
         </n-tab-pane>
         <n-tab-pane name="text" :tab="t('粘贴 / 文件')">
@@ -526,7 +556,9 @@ const statusOptions = [
             <span class="muted small">{{ fileSize(importFile.size) }}</span>
             <n-button size="tiny" quaternary @click="importFile = null">{{ t('移除') }}</n-button>
           </div>
-          <n-input v-else v-model:value="importText" type="textarea" :autosize="{ minRows: 6, maxRows: 14 }" :placeholder="t('粘贴书源 JSON')" class="mono" style="margin-top: 10px" />
+          <div v-else @paste.capture="onPaste">
+            <n-input v-model:value="importText" type="textarea" :autosize="{ minRows: 6, maxRows: 14 }" :placeholder="t('粘贴书源 JSON')" class="mono" style="margin-top: 10px" />
+          </div>
         </n-tab-pane>
       </n-tabs>
       <template #footer>

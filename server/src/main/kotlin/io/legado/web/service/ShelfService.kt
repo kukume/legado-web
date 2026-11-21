@@ -878,6 +878,7 @@ class ShelfService(
             Chapters.deleteWhere { Chapters.bookId eq bookId }
             ChapterContents.deleteWhere { ChapterContents.bookId eq bookId }
             Bookmarks.deleteWhere { Bookmarks.bookId eq bookId }
+            io.legado.web.db.BookHighlights.deleteWhere { io.legado.web.db.BookHighlights.bookId eq bookId }
         }
     }
 

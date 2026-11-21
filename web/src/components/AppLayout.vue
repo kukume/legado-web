@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h, onMounted, onUnmounted, watch, type Component } from 'vue'
+import { computed, h, onMounted, onUnmounted, ref, watch, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NIcon, NDropdown, NButton, useNotification } from 'naive-ui'
 import { ChevronBack, MoonOutline, SunnyOutline, ContrastOutline } from '@vicons/ionicons5'
@@ -80,6 +80,17 @@ onMounted(() => {
   ui.loadNavLayout()
 })
 
+/**
+ * 底栏选中项：点击时立即切换（高亮滑块马上滑过去，不等页面加载完），路由切换完成后以实际页面为准
+ */
+const tappedName = ref<string | null>(null)
+// 跳转完成或被取消（如路由守卫拦下）都恢复为实际页面
+const offAfterEach = router.afterEach(() => (tappedName.value = null))
+onUnmounted(offAfterEach)
+const bottomActive = computed(() => tappedName.value ?? activeName.value)
+/** 底栏里选中项的位置（高亮滑块的位置）；当前页面不在底栏里时为 -1 */
+const bottomIndex = computed(() => bottomNav.value.findIndex((i) => i.name === bottomActive.value))
+
 /** 当前页面的入口没有显示在导航栏里（从“我的”进入的）：页面顶部显示返回“我的”的按钮 */
 const showBack = computed(() => hiddenHere.value.some((i) => i.name === activeName.value))
 
@@ -152,13 +163,20 @@ function renderIcon(icon: Component) {
       </router-view>
     </main>
 
-    <nav class="bottom-nav">
+    <nav
+      class="bottom-nav"
+      :style="{ '--n': bottomNav.length, '--i': Math.max(bottomIndex, 0) }"
+      :class="{ 'has-active': bottomIndex >= 0 }"
+    >
+      <!-- 选中项后面的高亮，切换时滑过去 -->
+      <span class="bottom-pill" aria-hidden="true" />
       <router-link
         v-for="item in bottomNav"
         :key="item.name"
         :to="{ name: item.name }"
         class="bottom-item"
-        :class="{ active: activeName === item.name }"
+        :class="{ active: bottomActive === item.name }"
+        @click="tappedName = item.name"
       >
         <n-icon size="22"><component :is="item.icon" /></n-icon>
         <span>{{ item.label }}</span>
@@ -276,34 +294,90 @@ function renderIcon(icon: Component) {
     display: none;
   }
 
+  /*
+   * 悬浮的玻璃底栏（仿 iOS 26）：胶囊形状，不贴屏幕边缘；背后的内容模糊透出，边缘有高光；
+   * 选中项后面的高亮滑块切换时带回弹滑过去。页面底部留白见 base.css 的 --bottom-nav-space
+   */
   .bottom-nav {
+    --pad: 5px;
     display: flex;
     position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    left: 12px;
+    right: 12px;
+    bottom: max(10px, env(safe-area-inset-bottom) - 6px);
     z-index: 100;
-    background: var(--app-surface);
-    border-top: 1px solid var(--app-border);
-    padding-bottom: env(safe-area-inset-bottom);
+    height: 60px;
+    padding: var(--pad);
+    border-radius: 30px;
+    background: var(--glass-bg);
+    -webkit-backdrop-filter: blur(22px) saturate(180%);
+    backdrop-filter: blur(22px) saturate(180%);
+    border: 1px solid var(--glass-edge);
+    box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
+  }
+
+  /* 不支持背景模糊、或系统开了“降低透明度”：用不透明的底色，保证文字清楚 */
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .bottom-nav {
+      background: var(--app-surface);
+    }
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    .bottom-nav {
+      background: var(--app-surface);
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+  }
+
+  .bottom-pill {
+    position: absolute;
+    top: var(--pad);
+    bottom: var(--pad);
+    left: var(--pad);
+    width: calc((100% - 2 * var(--pad)) / var(--n));
+    border-radius: 25px;
+    background: color-mix(in srgb, var(--app-accent) 16%, transparent);
+    box-shadow: inset 0 1px 0 var(--glass-highlight);
+    transform: translateX(calc(var(--i) * 100%));
+    opacity: 0;
+    transition:
+      transform 0.45s cubic-bezier(0.34, 1.4, 0.64, 1),
+      opacity 0.2s;
+  }
+
+  .bottom-nav.has-active .bottom-pill {
+    opacity: 1;
   }
 
   .bottom-item {
+    position: relative;
     flex: 1;
     min-width: 0;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 2px;
-    padding: 6px 0 5px;
-    font-size: 11px;
+    justify-content: center;
+    gap: 1px;
+    border-radius: 25px;
+    font-size: 10.5px;
     text-decoration: none;
     color: var(--app-text-2);
+    -webkit-tap-highlight-color: transparent;
+    transition:
+      color 0.2s,
+      transform 0.2s cubic-bezier(0.34, 1.4, 0.64, 1);
+  }
+
+  /* 按下时轻轻缩小，松开回弹 */
+  .bottom-item:active {
+    transform: scale(0.9);
   }
 
   /* 入口较多（最多 7 个）、英文标签较长时省略 */
   .bottom-item span {
     max-width: 100%;
+    padding: 0 2px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -311,6 +385,14 @@ function renderIcon(icon: Component) {
 
   .bottom-item.active {
     color: var(--app-accent);
+    font-weight: 600;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .bottom-pill,
+    .bottom-item {
+      transition: none;
+    }
   }
 }
 </style>

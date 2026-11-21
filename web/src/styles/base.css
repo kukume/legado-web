@@ -6,6 +6,13 @@
   --app-text-2: #7a6d5a;
   --app-accent: #9c6b30;
   --app-shadow: 0 1px 3px rgba(80, 60, 30, 0.08), 0 6px 18px rgba(80, 60, 30, 0.06);
+  /* 玻璃材质（手机底栏）：半透明底色、边缘高光、悬浮阴影 */
+  --glass-bg: rgba(255, 253, 248, 0.62);
+  --glass-edge: rgba(255, 255, 255, 0.7);
+  --glass-highlight: rgba(255, 255, 255, 0.85);
+  --glass-shadow: 0 10px 30px rgba(80, 60, 30, 0.16), 0 2px 6px rgba(80, 60, 30, 0.08);
+  /* 手机底栏占用的高度（页面底部留白、贴底栏的浮层用）；电脑上没有底栏 */
+  --bottom-nav-space: 0px;
 }
 
 :root[data-theme='dark'] {
@@ -16,6 +23,10 @@
   --app-text-2: #a39886;
   --app-accent: #d4a15c;
   --app-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --glass-bg: rgba(42, 37, 29, 0.58);
+  --glass-edge: rgba(255, 255, 255, 0.12);
+  --glass-highlight: rgba(255, 255, 255, 0.16);
+  --glass-shadow: 0 10px 30px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.3);
 }
 
 * {
@@ -101,8 +112,13 @@ a {
 }
 
 @media (max-width: 767px) {
+  :root {
+    /* 悬浮底栏：高 60px，离底边 max(10px, 安全区 - 6px)，再留 16px 空隙 */
+    --bottom-nav-space: calc(60px + max(10px, env(safe-area-inset-bottom) - 6px) + 16px);
+  }
+
   .page {
-    padding: 12px 12px 80px;
+    padding: 12px 12px var(--bottom-nav-space);
   }
 }
 

@@ -9,9 +9,11 @@ import io.legado.app.utils.fromJsonArray
 import io.legado.web.auth.BadRequestException
 import io.legado.web.auth.UserPrincipal
 import io.legado.web.db.BookGroups
+import io.legado.web.db.BookHighlights
 import io.legado.web.db.Bookmarks
 import io.legado.web.db.Books
 import io.legado.web.db.ChapterContents
+import io.legado.web.db.Chapters
 import io.legado.web.db.SourceSubscriptions
 import io.legado.web.db.dbQuery
 import org.jetbrains.exposed.v1.core.SortOrder
@@ -39,6 +41,8 @@ import java.util.zip.ZipOutputStream
  * - bookGroup.json：书架分组
  * - bookSource.json：书源
  * - replaceRule.json：替换规则
+ * - highlightRule.json：高亮规则（格式与 LegadoTeam/legado 的 App 相同）
+ * - highlight.json：手动标注（同上）
  * - sourceSub.json：书源订阅
  *
  * 阅读进度：章节序号完全对应；章内位置 App 记录的是字符偏移，网页版记录的是 0-10000 的比例（音频、视频两边都是毫秒），
@@ -50,6 +54,7 @@ class BackupService(
     private val replaceService: ReplaceRuleService,
     private val dictService: DictRuleService,
     private val tocService: TxtTocRuleService,
+    private val highlightService: HighlightRuleService,
 ) {
 
     /** App 的书签（time 为主键；chapterPos 为章内字符偏移） */
@@ -62,6 +67,27 @@ class BackupService(
         val chapterName: String = "",
         val bookText: String = "",
         val content: String = "",
+    )
+
+    /**
+     * App 的手动标注（LegadoTeam/legado 的 BookHighlight，time 为主键）。
+     * chapterPos 是 App 排版文字（章节名 + 带缩进的正文）中的偏移，减去 layoutTitleLength 是正文中的偏移；
+     * 两边的正文不完全相同（缩进、替换规则），位置只是大概，两边都会按 bookText 重新定位
+     */
+    data class AppBookHighlight(
+        val time: Long = 0,
+        val bookUrl: String = "",
+        val chapterUrl: String = "",
+        val bookName: String = "",
+        val bookAuthor: String = "",
+        val chapterIndex: Int = 0,
+        val chapterPos: Int = 0,
+        val chapterPosEnd: Int = 0,
+        val layoutTitleLength: Int = -1,
+        val chapterName: String = "",
+        val bookText: String = "",
+        val style: String = "",
+        val note: String = "",
     )
 
     /** App 中的分组（groupId 为 2 的幂，书籍的 group 字段是这些 id 的按位或） */
@@ -106,7 +132,10 @@ class BackupService(
         var dictRulesImported: Int = 0,
         /** 导入（按 id 覆盖）的 TXT 目录规则数 */
         var tocRulesImported: Int = 0,
+        /** 导入（按 uuid 覆盖）的高亮规则数 */
+        var highlightRulesImported: Int = 0,
         var bookmarksAdded: Int = 0,
+        var highlightsAdded: Int = 0,
         var subsAdded: Int = 0,
         val files: MutableList<String> = mutableListOf(),
         val warnings: MutableList<String> = mutableListOf(),
@@ -119,8 +148,8 @@ class BackupService(
         /** 导出的 id 加上这个基数，避免覆盖 App 中已有的记录（App 的 id 一般是毫秒时间戳） */
         private const val ID_BASE = 1_600_000_000_000L
 
-        private val WANTED = setOf("bookshelf.json", "bookGroup.json", "bookSource.json", "replaceRule.json", "sourceSub.json", "bookmark.json",
-            "dictRule.json", "txtTocRule.json")
+        private val WANTED = setOf("bookshelf.json", "bookGroup.json", "bookSource.json", "replaceRule.json", "sourceSub.json", "bookmark.json", "highlight.json",
+            "dictRule.json", "txtTocRule.json", "highlightRule.json")
     }
 
     // ---------------- 导出 ----------------
@@ -136,6 +165,7 @@ class BackupService(
             })
             files["bookshelf.json"] = GSON.toJson(exportBooks(user, groupBits))
             files["bookmark.json"] = GSON.toJson(exportBookmarks(user))
+            files["highlight.json"] = GSON.toJson(exportHighlights(user))
         }
         if (parts.sources) {
             files["bookSource.json"] = GSON.toJson(sourceService.export(user, null))
@@ -144,6 +174,7 @@ class BackupService(
             files["replaceRule.json"] = GSON.toJson(replaceService.list(user.id).map { it.copy(id = ID_BASE + it.id) })
             files["dictRule.json"] = GSON.toJson(dictService.list(user.id))
             files["txtTocRule.json"] = GSON.toJson(tocService.list(user.id))
+            highlightService.list(user.id).takeIf { it.size() > 0 }?.let { files["highlightRule.json"] = it.toString() }
         }
         if (parts.subs) {
             val subs = dbQuery {
@@ -257,7 +288,88 @@ class BackupService(
             }
     }
 
+    private suspend fun exportHighlights(user: UserPrincipal): List<AppBookHighlight> = dbQuery {
+        val books = Books.selectAll()
+            .where { (Books.userId eq user.id) and (Books.inShelf eq true) and (Books.origin neq BookType.localTag) }
+            .associate { it[Books.id].value to Triple(it[Books.bookUrl], it[Books.name], it[Books.author]) }
+        if (books.isEmpty()) return@dbQuery emptyList()
+        val usedTimes = mutableSetOf<Long>()
+        BookHighlights.selectAll().where { (BookHighlights.userId eq user.id) and (BookHighlights.bookId inList books.keys) }
+            .orderBy(BookHighlights.createdAt to SortOrder.ASC)
+            .map { r ->
+                val bookId = r[BookHighlights.bookId]
+                val (bookUrl, name, author) = books.getValue(bookId)
+                val index = r[BookHighlights.chapterIndex]
+                var time = r[BookHighlights.createdAt]
+                while (!usedTimes.add(time)) time++
+                val chapterUrl = Chapters.select(Chapters.url)
+                    .where { (Chapters.bookId eq bookId) and (Chapters.index eq index) }
+                    .firstOrNull()?.get(Chapters.url).orEmpty()
+                AppBookHighlight(
+                    time = time,
+                    bookUrl = bookUrl,
+                    chapterUrl = chapterUrl,
+                    bookName = name,
+                    bookAuthor = author,
+                    chapterIndex = index,
+                    // 网页版的位置不含章节名：layoutTitleLength 为 0，App 直接按正文偏移使用
+                    chapterPos = r[BookHighlights.chapterPos],
+                    chapterPosEnd = r[BookHighlights.chapterPosEnd],
+                    layoutTitleLength = 0,
+                    chapterName = r[BookHighlights.chapterName],
+                    bookText = r[BookHighlights.bookText],
+                    style = r[BookHighlights.style],
+                    note = r[BookHighlights.note],
+                )
+            }
+    }
+
     // ---------------- 导入 ----------------
+
+    /** 按书的地址（找不到时按书名、作者）对应到书架上的书；同一本书里创建时间相同的标注视为已导入 */
+    private suspend fun importHighlights(user: UserPrincipal, json: String, s: ImportSummary) {
+        val list = GSON.fromJsonArray<AppBookHighlight>(json).getOrElse {
+            s.warnings.add("highlight.json 解析失败：${it.message}")
+            return
+        }
+        if (list.isEmpty()) return
+        var missing = 0
+        dbQuery {
+            val rows = Books.selectAll().where { Books.userId eq user.id }.toList()
+            val byUrl = rows.associate { it[Books.bookUrl] to it[Books.id].value }
+            val byName = rows.associate { (it[Books.name] to it[Books.author]) to it[Books.id].value }
+            val existing = BookHighlights.selectAll().where { BookHighlights.userId eq user.id }
+                .map { it[BookHighlights.bookId] to it[BookHighlights.createdAt] }
+                .toMutableSet()
+            for (h in list) {
+                if (h.bookText.isEmpty()) continue
+                val bookId = byUrl[h.bookUrl] ?: byName[h.bookName to h.bookAuthor]
+                if (bookId == null) {
+                    missing++
+                    continue
+                }
+                val time = if (h.time > 0) h.time else System.currentTimeMillis()
+                if (!existing.add(bookId to time)) continue
+                // 换算成正文中的偏移：不知道 App 排版时的章节名长度时按章节名加一个换行估算
+                val titleLength = h.layoutTitleLength.takeIf { it >= 0 } ?: (h.chapterName.length + 1)
+                val start = (h.chapterPos - titleLength).coerceAtLeast(0)
+                BookHighlights.insert {
+                    it[BookHighlights.userId] = user.id
+                    it[BookHighlights.bookId] = bookId
+                    it[chapterIndex] = h.chapterIndex.coerceAtLeast(0)
+                    it[chapterName] = h.chapterName.take(500)
+                    it[chapterPos] = start
+                    it[chapterPosEnd] = start + h.bookText.length.coerceAtMost(BookHighlightService.MAX_TEXT)
+                    it[bookText] = h.bookText.take(BookHighlightService.MAX_TEXT)
+                    it[style] = h.style.take(BookHighlightService.MAX_STYLE)
+                    it[note] = h.note.take(BookHighlightService.MAX_TEXT)
+                    it[createdAt] = time
+                }
+                s.highlightsAdded++
+            }
+        }
+        if (missing > 0) s.warnings.add("有 $missing 个标注对应的书不在书架上，已跳过")
+    }
 
     private suspend fun importBookmarks(user: UserPrincipal, json: String, s: ImportSummary) {
         val list = GSON.fromJsonArray<AppBookmark>(json).getOrElse {
@@ -313,11 +425,17 @@ class BackupService(
             files["bookshelf.json"]?.let { importBooks(user, it, groupMap, summary) }
             // 书签按书名、作者对应到书架上的书，所以在书架之后导入
             files["bookmark.json"]?.let { importBookmarks(user, it, summary) }
+            files["highlight.json"]?.let { importHighlights(user, it, summary) }
         }
         if (parts.rules) {
             files["replaceRule.json"]?.let { importRules(user, it, summary) }
             files["dictRule.json"]?.let { importDictRules(user, it, summary) }
             files["txtTocRule.json"]?.let { importTocRules(user, it, summary) }
+            files["highlightRule.json"]?.let { json ->
+                runCatching { highlightService.import(user.id, json) }
+                    .onSuccess { summary.highlightRulesImported = it }
+                    .onFailure { summary.warnings.add("highlightRule.json 导入失败：${it.message}") }
+            }
         }
         if (parts.subs) files["sourceSub.json"]?.let { importSubs(user, it, summary) }
         return summary

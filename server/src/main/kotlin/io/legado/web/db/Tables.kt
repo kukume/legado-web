@@ -205,7 +205,7 @@ val allTables = arrayOf(
     Users, InviteCodes, InviteUsages, Settings, BookSources, UserSourcePrefs,
     SourceSubscriptions, EngineCaches, Cookies, BookGroups, Books, Chapters,
     ChapterContents, ReplaceRules, UserPrefs, ApiKeys, TtsEngines, Bookmarks, ReadingStats,
-    DictRules, TxtTocRules, UserFonts,
+    DictRules, TxtTocRules, UserFonts, BookHighlights,
 )
 
 /**
@@ -236,6 +236,27 @@ object Bookmarks : LongIdTable("bookmarks") {
     val bookText = text("book_text").default("")
     /** 备注 */
     val content = text("content").default("")
+    val createdAt = long("created_at")
+}
+
+/**
+ * 手动标注（选中正文添加的高亮，与 App 的 BookHighlight 对应）。
+ * 位置是章节正文中的字符偏移：正文按段落拼接，每段后面一个换行（不含章节名、段首缩进），见 web/src/utils/highlight.ts
+ */
+object BookHighlights : LongIdTable("book_highlights") {
+    val userId = long("user_id").index()
+    val bookId = long("book_id").index()
+    val chapterIndex = integer("chapter_index")
+    val chapterName = varchar("chapter_name", 512).default("")
+    val chapterPos = integer("chapter_pos").default(0)
+    val chapterPosEnd = integer("chapter_pos_end").default(0)
+    /** 标注的文字（正文变化后按它重新定位） */
+    val bookText = text("book_text").default("")
+    /** 样式（HighlightStyle 的 JSON，与 App 相同） */
+    val style = text("style").default("")
+    /** 备注 */
+    val note = text("note").default("")
+    /** 创建时间（毫秒），对应 App 的 time（主键） */
     val createdAt = long("created_at")
 }
 

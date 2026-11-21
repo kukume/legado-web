@@ -126,7 +126,32 @@ function remove(u: User) {
 
 const nameOf = (id: number | null) => users.value.find((u) => u.id === id)?.username ?? '-'
 
-const desktopColumns: DataTableColumns<User> = [
+/** 已保存的设置里开启了“允许所有用户添加书源”：每个用户的添加书源权限没有意义，不显示（未保存的修改不算） */
+const allUsersCanAddSource = computed(() => {
+  try {
+    return JSON.parse(savedSettings.value).allowUserSources === 'true'
+  } catch {
+    return false
+  }
+})
+
+const sourceColumn: DataTableColumns<User>[number] = {
+  title: t('添加书源'),
+  key: 'canAddSource',
+  width: 100,
+  align: 'center',
+  // 管理员始终可以添加书源：显示为开启且不可修改
+  render: (u) =>
+    h(NSwitch, {
+      size: 'small',
+      value: u.role === 'admin' || u.canAddSource,
+      disabled: u.role === 'admin',
+      title: u.role === 'admin' ? t('管理员始终可以添加书源') : undefined,
+      onUpdateValue: (v: boolean) => update(u, { canAddSource: v }),
+    }),
+}
+
+const desktopColumns = computed<DataTableColumns<User>>(() => [
   // 用户名、邀请人平分剩余宽度，其余列按内容定宽；操作列固定在右侧，手机上横向滚动时也能看到
   { title: 'ID', key: 'id', width: 56 },
   { title: t('用户名'), key: 'username', minWidth: 140, ellipsis: { tooltip: true } },
@@ -137,21 +162,7 @@ const desktopColumns: DataTableColumns<User> = [
     align: 'center',
     render: (u) => h(NSwitch, { size: 'small', value: u.enabled, disabled: u.id === auth.user?.id, onUpdateValue: (v: boolean) => update(u, { enabled: v }) }),
   },
-  {
-    title: t('添加书源'),
-    key: 'canAddSource',
-    width: 100,
-    align: 'center',
-    // 管理员始终可以添加书源：显示为开启且不可修改
-    render: (u) =>
-      h(NSwitch, {
-        size: 'small',
-        value: u.role === 'admin' || u.canAddSource,
-        disabled: u.role === 'admin',
-        title: u.role === 'admin' ? t('管理员始终可以添加书源') : undefined,
-        onUpdateValue: (v: boolean) => update(u, { canAddSource: v }),
-      }),
-  },
+  ...(allUsersCanAddSource.value ? [] : [sourceColumn]),
   { title: t('邀请人'), key: 'invitedBy', minWidth: 120, ellipsis: { tooltip: true }, render: (u) => nameOf(u.invitedBy) },
   { title: t('注册时间'), key: 'createdAt', width: 150, render: (u) => formatDate(u.createdAt) },
   {
@@ -165,7 +176,7 @@ const desktopColumns: DataTableColumns<User> = [
         u.id !== auth.user?.id ? h(NButton, { size: 'tiny', type: 'error', ghost: true, onClick: () => remove(u) }, () => t('删除')) : null,
       ]),
   },
-]
+])
 
 /** 手机上与书源列表一样：用户名（下面一行注册时间、邀请人） | 启用 | ⋮ 菜单 */
 const isMobile = useIsMobile()
@@ -182,14 +193,14 @@ const mobileCols = computed(() =>
     onToggle: (u, v) => update(u, { enabled: v }),
     actions: (u) => [
       { key: 'reset', label: t('重置密码'), onSelect: () => { resetTarget.value = u; resetPwd.value = '' } },
-      ...(u.role === 'admin'
+      ...(u.role === 'admin' || allUsersCanAddSource.value
         ? []
         : [{ key: 'source', label: u.canAddSource ? t('取消添加书源权限') : t('允许添加书源'), onSelect: () => update(u, { canAddSource: !u.canAddSource }) }]),
       ...(u.id !== auth.user?.id ? [{ key: 'delete', label: t('删除'), danger: true, onSelect: () => remove(u) }] : []),
     ],
   }),
 )
-const columns = computed(() => (isMobile.value ? mobileCols.value : desktopColumns))
+const columns = computed(() => (isMobile.value ? mobileCols.value : desktopColumns.value))
 
 async function doReset() {
   if (!resetTarget.value || resetPwd.value.length < 6) return message.warning(t('密码至少 6 位'))
@@ -285,7 +296,7 @@ async function saveSettings() {
           :loading="loading"
           size="small"
           :class="{ 'm-table': isMobile }"
-          :scroll-x="isMobile ? undefined : 790"
+          :scroll-x="isMobile ? undefined : allUsersCanAddSource ? 690 : 790"
           :table-layout="isMobile ? 'fixed' : 'auto'"
         />
       </n-tab-pane>
@@ -784,7 +795,8 @@ async function saveSettings() {
   }
 
   .save-bar {
-    bottom: calc(64px + env(safe-area-inset-bottom));
+    /* 浮在手机底栏上方 */
+    bottom: calc(var(--bottom-nav-space) - 8px);
   }
 }
 

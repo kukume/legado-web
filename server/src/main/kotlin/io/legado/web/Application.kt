@@ -124,6 +124,7 @@ fun Application.module() {
     val sourceService = SourceService(settingService, userService)
     val replaceService = ReplaceRuleService()
     val bookmarkService = BookmarkService()
+    val bookHighlightService = io.legado.web.service.BookHighlightService()
     val readingStatsService = ReadingStatsService()
     val shelfService = ShelfService(sourceService, replaceService, appSettings)
     val searchService = SearchService(sourceService, settingService)
@@ -138,7 +139,7 @@ fun Application.module() {
         it.tocRules = txtTocRuleService
         shelfService.localBooks = it
     }
-    val backupService = BackupService(sourceService, shelfService, replaceService, dictRuleService, txtTocRuleService)
+    val backupService = BackupService(sourceService, shelfService, replaceService, dictRuleService, txtTocRuleService, io.legado.web.service.HighlightRuleService())
     val reviewService = io.legado.web.service.ReviewService(shelfService)
     // 音频书源播放、在线朗读引擎
     val audioService = io.legado.web.service.AudioService(shelfService)
@@ -274,7 +275,7 @@ fun Application.module() {
         openApiRoutes(apiKeyService, shelfService, readingStatsService)
         backupRoutes(backupService, webDavService)
         mediaRoutes(audioService, ttsService, io.legado.web.service.FontService(appSettings.dataDir))
-        bookmarkRoutes(bookmarkService)
+        bookmarkRoutes(bookmarkService, bookHighlightService)
         readingStatsRoutes(readingStatsService)
         ruleRoutes(dictRuleService, txtTocRuleService)
         browserRoutes(browserBridge)

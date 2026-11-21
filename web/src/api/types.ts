@@ -360,6 +360,23 @@ export interface Bookmark {
   createdAt: number
 }
 
+/** 手动标注（选中正文添加的高亮，与 App 的 BookHighlight 对应） */
+export interface BookHighlight {
+  id: number
+  bookId: number
+  chapterIndex: number
+  chapterName: string
+  /** 章节正文中的字符偏移（见 utils/highlight 的 chapterLayout），起点含、终点不含 */
+  chapterPos: number
+  chapterPosEnd: number
+  /** 标注的文字（正文变化后按它重新定位） */
+  bookText: string
+  /** HighlightStyle 的 JSON */
+  style: string
+  note: string
+  createdAt: number
+}
+
 /** 字典规则（App 的 DictRule） */
 export interface DictRule {
   name: string

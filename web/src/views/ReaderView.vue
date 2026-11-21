@@ -2,7 +2,7 @@
 import { goBack } from '@/utils/navigation'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NIcon, NModal, NSpin, useMessage } from 'naive-ui'
+import { NButton, NIcon, NInput, NModal, NSpace, NSpin, useMessage } from 'naive-ui'
 import { ChevronBackOutline, ChevronForwardOutline } from '@vicons/ionicons5'
 import { searchApi, shelfApi, toOpenRequest } from '@/api'
 import QuickReplaceModal from '@/components/QuickReplaceModal.vue'
@@ -15,6 +15,12 @@ import CustomThemeModal from '@/components/CustomThemeModal.vue'
 import ChangeSourceModal from '@/components/ChangeSourceModal.vue'
 import KeyBindingsModal from '@/components/KeyBindingsModal.vue'
 import ChapterBody from '@/components/reader/ChapterBody.vue'
+import { useHighlightStore } from '@/stores/highlight'
+import { blankHighlightRule, chapterLayout, createHighlighter, marksOnly, parseStyle, stringifyStyle, type HighlightRule, type HighlightStyle } from '@/utils/highlight'
+import { lastHighlightStyle, saveLastHighlightStyle, useBookHighlights } from '@/composables/useBookHighlights'
+import HighlightActionBar from '@/components/reader/HighlightActionBar.vue'
+import HighlightStyleEditor from '@/components/rules/HighlightStyleEditor.vue'
+import HighlightRuleEditModal from '@/components/rules/HighlightRuleEditModal.vue'
 import { isPdfBook, pdfPageOf, primePages } from '@/utils/pdf'
 import ReaderMenu from '@/components/reader/ReaderMenu.vue'
 import ReaderTocDrawer from '@/components/reader/ReaderTocDrawer.vue'
@@ -23,10 +29,10 @@ import AutoReadBar from '@/components/reader/AutoReadBar.vue'
 import SelectionBar from '@/components/reader/SelectionBar.vue'
 import AddBookmarkModal from '@/components/reader/AddBookmarkModal.vue'
 import type { BookmarkDraft, Segment } from '@/components/reader/types'
-import { getClientId, getToken, isNetworkError, proxyImage } from '@/api/http'
+import { deviceOffline, getClientId, getToken, isNetworkError, proxyImage } from '@/api/http'
 import { putLocalProgress } from '@/offline/db'
 import { useOfflineStore } from '@/stores/offline'
-import type { Book, Bookmark, BookSearchHit, Chapter, SearchBook } from '@/api/types'
+import type { Book, BookHighlight, Bookmark, BookSearchHit, Chapter, SearchBook } from '@/api/types'
 import { customFontId, customThemeKey, customToTheme, fontFamily, readerThemes, useReaderStore, type CustomTheme, type PageAnim } from '@/stores/reader'
 import { parseContent, type ContentImage } from '@/utils/content'
 import { useScriptEffects } from '@/utils/effects'
@@ -61,6 +67,15 @@ const cfg = computed(() => readerStore.config)
 
 const bookId = computed(() => Number(route.params.id))
 const book = ref<Book | null>(null)
+/** 高亮规则：粗体会改变文字宽度，翻页模式下规则变化后要重新分页（见下面的排版 watch） */
+const highlight = useHighlightStore()
+highlight.load()
+const hlBookName = computed(() => book.value?.name ?? '')
+const hlBookOrigin = computed(() => book.value?.origin ?? '')
+/** 高亮规则关闭时仍显示手动标注 */
+const hl = computed(() =>
+  cfg.value.highlight === false ? marksOnly : createHighlighter(highlight.rules, { name: hlBookName.value, origin: hlBookOrigin.value }),
+)
 const chapters = ref<Chapter[]>([])
 const loadingInit = ref(true)
 const menuVisible = ref(false)
@@ -461,6 +476,187 @@ async function onReplaceSaved() {
   await goChapter(curIndex.value, curPos.value)
 }
 
+// ---------------- 手动标注（选中文字后“高亮”，与 App 的标注相同） ----------------
+
+const marks = useBookHighlights(bookId)
+
+/** 第 index 章当前显示的段落（滚动模式下可能同时显示几章） */
+function segOf(index: number): Segment | undefined {
+  if (isPaged.value) return pageSeg.value?.index === index ? pageSeg.value : undefined
+  return segments.value.find((s) => s.index === index)
+}
+
+/** 选中文字在本章正文中的位置（见 utils/highlight 的 chapterLayout），选中的不是正文文字时返回 null */
+function selectionRange(): { chapter: number; start: number; end: number; text: string } | null {
+  const { chapter, para, prefix, endChapter, endPara, endPrefix } = selection
+  if (chapter < 0 || para < 0) return null
+  const seg = segOf(chapter)
+  if (!seg) return null
+  const { starts, text } = chapterLayout(seg.paras)
+  const ps = starts[para]
+  if (ps === undefined || ps < 0) return null
+  const lenOf = (i: number) => ((seg.paras[i] as { text?: string }).text ?? '').length
+  let start = ps + Math.min(prefix.length, lenOf(para))
+  // 终点不在本章的段落里（如选到了下一章）时到本章末尾
+  const pe = endChapter === chapter ? starts[endPara] : undefined
+  let end = pe !== undefined && pe >= 0 ? pe + Math.min(endPrefix.length, lenOf(endPara)) : text.length
+  while (start < end && /\s/.test(text[start])) start++
+  while (end > start && /\s/.test(text[end - 1])) end--
+  if (end <= start) return null
+  return { chapter, start, end, text: text.slice(start, end) }
+}
+
+/** 标注的操作菜单 */
+const markBar = reactive({ show: false, x: 0, y: 0, id: 0 })
+
+function showMarkBar(id: number, x: number, rectTop: number, rectBottom: number) {
+  markBar.id = id
+  markBar.x = x
+  markBar.y = rectBottom + 56 < window.innerHeight ? rectBottom + 8 : Math.max(8, rectTop - 48)
+  markBar.show = true
+}
+
+/** 点击（或双击、长按）的是标注时打开它的菜单，返回是否打开了 */
+function openMarkAt(e: MouseEvent): boolean {
+  if (cfg.value.highlightTrigger === 'off') return false
+  const el = (e.target as HTMLElement).closest('[data-mark]') as HTMLElement | null
+  const id = Number(el?.dataset.mark)
+  if (!el || !Number.isFinite(id) || !marks.find(id)) return false
+  const r = el.getBoundingClientRect()
+  showMarkBar(id, e.clientX, r.top, r.bottom)
+  return true
+}
+
+function onMarkDblClick(e: MouseEvent) {
+  if (cfg.value.highlightTrigger === 'dblclick' && openMarkAt(e)) {
+    e.preventDefault()
+    window.getSelection()?.removeAllRanges()
+  }
+}
+
+function onMarkContextMenu(e: MouseEvent) {
+  if (cfg.value.highlightTrigger === 'longpress' && openMarkAt(e)) e.preventDefault()
+}
+
+async function addHighlight() {
+  const r = selectionRange()
+  const { x, y } = selection
+  if (!r) {
+    clearSelection()
+    message.warning(t('只能标注正文中的文字'))
+    return
+  }
+  try {
+    const saved = await marks.add({
+      chapterIndex: r.chapter,
+      chapterName: chapters.value[r.chapter]?.title ?? '',
+      chapterPos: r.start,
+      chapterPosEnd: r.end,
+      bookText: r.text.slice(0, 2000),
+      style: stringifyStyle(lastHighlightStyle()),
+      note: '',
+    })
+    clearSelection()
+    // 与 App 相同：添加后打开这条标注的菜单，可以马上换样式、写备注
+    showMarkBar(saved.id, x, y - 40, y - 8)
+  } catch (e: any) {
+    message.error(e.message)
+  }
+}
+
+const markStyle = ref<HighlightStyle | null>(null)
+let markStyleOrig = ''
+function openMarkStyle() {
+  const h = marks.find(markBar.id)
+  markBar.show = false
+  if (!h) return
+  markStyleOrig = h.style
+  markStyle.value = parseStyle(h.style)
+}
+/** 调整样式时正文实时变化，关闭时保存 */
+watch(markStyle, (st) => {
+  if (st) marks.preview(markBar.id, stringifyStyle(st))
+})
+async function closeMarkStyle() {
+  const st = markStyle.value
+  markStyle.value = null
+  if (!st) return
+  const style = stringifyStyle(st)
+  if (style === markStyleOrig) return
+  try {
+    await marks.update(markBar.id, { style })
+    saveLastHighlightStyle(st)
+  } catch (e: any) {
+    marks.preview(markBar.id, markStyleOrig)
+    message.error(e.message)
+  }
+}
+
+const markNote = reactive({ show: false, id: 0, text: '' })
+function openMarkNote(h?: BookHighlight) {
+  const target = h ?? marks.find(markBar.id)
+  markBar.show = false
+  if (!target) return
+  markNote.id = target.id
+  markNote.text = target.note
+  markNote.show = true
+}
+async function saveMarkNote() {
+  try {
+    await marks.update(markNote.id, { note: markNote.text })
+    markNote.show = false
+  } catch (e: any) {
+    message.error(e.message)
+  }
+}
+
+/** 用标注的文字和样式新建高亮规则 */
+const ruleDraft = ref<HighlightRule | null>(null)
+function markToRule() {
+  const h = marks.find(markBar.id)
+  markBar.show = false
+  if (!h) return
+  ruleDraft.value = { ...blankHighlightRule(), name: h.bookText.slice(0, 20), pattern: h.bookText, style: h.style || '{}' }
+}
+
+async function copyMark() {
+  const h = marks.find(markBar.id)
+  markBar.show = false
+  if (!h) return
+  if (await copyText(h.bookText)) message.success(t('已复制'))
+  else message.error(t('当前浏览器不允许复制，请使用系统菜单中的“拷贝”'))
+}
+
+async function removeMark(h?: BookHighlight) {
+  const id = h?.id ?? markBar.id
+  markBar.show = false
+  try {
+    await marks.remove([id])
+  } catch (e: any) {
+    message.error(e.message)
+  }
+}
+
+/** 从目录的标注列表跳到标注处 */
+async function jumpHighlight(h: BookHighlight) {
+  showToc.value = false
+  const index = resolveChapter(h.chapterIndex, h.chapterName)
+  await goChapter(index, 0)
+  await nextTick()
+  setTimeout(() => {
+    const root = isPaged.value ? columns.value : segRefs.get(index)
+    const els = root ? Array.from(root.querySelectorAll(`[data-mark="${h.id}"]`)) : []
+    if (els.length) {
+      const range = document.createRange()
+      range.setStartBefore(els[0])
+      range.setEndAfter(els[els.length - 1])
+      revealRange(range)
+    } else {
+      revealText(index, h.bookText, 0)
+    }
+  }, 150)
+}
+
 /**
  * 书签记录的是章节序号，换源后章节顺序可能变了：序号对应的章节名不一致时，按章节名找（同名的取离原序号最近的），
  * 完全相同找不到时去掉“第 X 章”前缀再比较；都找不到就仍用原序号
@@ -504,12 +700,17 @@ function revealText(index: number, text: string, pos: number) {
   const root = isPaged.value ? columns.value : segRefs.get(index)
   if (!root) return
   const range = findTextRange(root, text, pos)
-  if (!range) return
+  if (range) revealRange(range)
+}
+
+/** 把一段文字移到可见位置（滚动或翻到所在的页），并短暂高亮 */
+function revealRange(range: Range) {
+  const root = isPaged.value ? columns.value : null
   const r = range.getBoundingClientRect()
   if (!isPaged.value) {
     const s = scroller.value
     if (s && (r.top < 60 || r.bottom > s.clientHeight - 60)) s.scrollTop += r.top - s.clientHeight / 3
-  } else {
+  } else if (root) {
     const cr = root.getBoundingClientRect()
     let target = page.value
     if (isVertical.value) {
@@ -531,7 +732,12 @@ function revealText(index: number, text: string, pos: number) {
 
 function onTap(e: MouseEvent) {
   // 可点击的图片（段评气泡等）自己处理点击；普通图片（如漫画）与点击文字一样翻页 / 呼出菜单
-  if ((e.target as HTMLElement).closest('a,button,img.clickable,.sel-bar,.auto-bar')) return
+  if ((e.target as HTMLElement).closest('a,button,img.clickable,.sel-bar,.hl-bar,.auto-bar')) return
+  // 标注的操作菜单打开时，点击别处只关闭菜单
+  if (markBar.show) {
+    markBar.show = false
+    return
+  }
   // 选中文字后的点击只用来取消选择，不翻页；拖动选择文字结束时也会触发点击
   if (selection.show) {
     if (!textSel.hasSelectedText()) textSel.hide()
@@ -539,6 +745,7 @@ function onTap(e: MouseEvent) {
   }
   if (textSel.hasSelectedText()) return
   if (Date.now() - lastSwipe < 400) return // 滑动翻页后浏览器可能还会触发一次点击
+  if ((cfg.value.highlightTrigger ?? 'click') === 'click' && openMarkAt(e)) return
   const w = window.innerWidth
   const hgt = window.innerHeight
   const x = e.clientX
@@ -604,7 +811,11 @@ function onKey(e: KeyboardEvent) {
   const target = e.target as HTMLElement | null
   if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.isContentEditable) return
   // 弹窗打开时不翻页
-  if (showKeys.value || showDict.value || showReplace.value || bookmarkDraft.value) return
+  if (showKeys.value || showDict.value || showReplace.value || bookmarkDraft.value || markStyle.value || markNote.show || ruleDraft.value) return
+  if (markBar.show && e.key === "Escape") {
+    markBar.show = false
+    return
+  }
   if (e.key === "Escape") {
     menuVisible.value = false
     return
@@ -658,7 +869,7 @@ watch(
 watch(
   () => [cfg.value.fontSize, cfg.value.lineHeight, cfg.value.paragraphSpacing, cfg.value.letterSpacing,
     cfg.value.fontFamily, cfg.value.width, cfg.value.indent, cfg.value.fontWeight, fontVersion.value,
-    cfg.value.titleAlign, cfg.value.titleSize, cfg.value.titleTop, cfg.value.titleBottom],
+    cfg.value.titleAlign, cfg.value.titleSize, cfg.value.titleTop, cfg.value.titleBottom, hl.value, marks.version.value],
   async () => {
     if (isPaged.value) {
       await nextTick()
@@ -689,10 +900,10 @@ onMounted(async () => {
     } catch (e) {
       offline.markError(e)
       const local = isNetworkError(e) ? await offline.loadOfflineBook(bookId.value) : null
-      if (!local) throw isNetworkError(e) ? new Error(t('当前离线，这本书还没有离线下载')) : e
+      if (!local) throw isNetworkError(e) ? new Error(deviceOffline() ? t('当前离线，这本书还没有离线下载') : t('连不上服务器，这本书也还没有离线下载')) : e
       ;({ book: b, chapters: c } = local)
       start = { index: b.durChapterIndex, pos: b.durChapterPos }
-      message.info(t('当前离线，正在阅读已下载的章节'))
+      message.info(deviceOffline() ? t('当前离线，正在阅读已下载的章节') : t('连不上服务器，正在阅读已下载的章节'))
     }
     if (b.isAudio || b.isVideo) {
       // 音频用播放器、视频（短剧）用竖屏播放页打开
@@ -758,7 +969,7 @@ async function onImgClick(index: number, img: ContentImage) {
     // 脚本错误会附带大段源码上下文，只显示第一行
     if (!r.ok && r.message) message.error(String(r.message).split(/\n| Source context/)[0])
   } catch (e: any) {
-    message.error(isNetworkError(e) ? t('当前离线，无法打开评论') : e.message)
+    message.error(isNetworkError(e) ? (deviceOffline() ? t('当前离线，无法打开评论') : t('连不上服务器，无法打开评论')) : e.message)
   } finally {
     clickingImg.value = false
   }
@@ -786,7 +997,7 @@ const autoRead = useAutoRead({
   },
   blocked: () =>
     autoPaused.value || menuVisible.value || showToc.value || showSettings.value || showChange.value || showKeys.value ||
-    !!bookmarkDraft.value || showReplace.value || showDict.value || selection.show || tts.active || loadingInit.value || pageLoading.value ||
+    !!bookmarkDraft.value || showReplace.value || showDict.value || selection.show || markBar.show || !!markStyle.value || markNote.show || tts.active || loadingInit.value || pageLoading.value ||
     document.visibilityState !== "visible",
   onEnd: () => message.info(t('已经读到最后了，自动阅读已停止')),
 })
@@ -914,7 +1125,7 @@ function onChanged(nb: Book) {
     <div v-if="loadingInit" class="center"><n-spin /></div>
 
     <!-- 滚动模式 -->
-    <div v-if="mode === 'scroll' && !loadingInit" ref="scroller" class="scroller" @scroll.passive="onScroll" @touchstart.passive="onScrollerTouchStart" @touchend.passive="onScrollerTouchEnd" @touchcancel.passive="onScrollerTouchEnd" @click="onTap">
+    <div v-if="mode === 'scroll' && !loadingInit" ref="scroller" class="scroller" @scroll.passive="onScroll" @touchstart.passive="onScrollerTouchStart" @touchend.passive="onScrollerTouchEnd" @touchcancel.passive="onScrollerTouchEnd" @click="onTap" @dblclick="onMarkDblClick" @contextmenu="onMarkContextMenu">
       <div class="paper">
         <article v-for="seg in segments" :key="seg.index" :ref="(el) => setSegRef(seg.index, el)" class="chapter">
           <chapter-body
@@ -923,6 +1134,8 @@ function onChanged(nb: Book) {
             :fmt-review="fmtReview"
             :img-src="imgSrc"
             :pdf-book-id="isPdf ? bookId : undefined"
+            :hl="hl"
+            :marks="marks.marksFor(seg.index, seg.paras)"
             scroll-mode
             @review="(pn: number, text?: string) => openReview(seg.index, pn, text)"
             @img-tap="(e: MouseEvent, img: ContentImage) => onImgTap(e, seg.index, img)"
@@ -944,6 +1157,8 @@ function onChanged(nb: Book) {
       class="pager"
       :class="{ vertical: isVertical, double: isDouble }"
       @click="onTap"
+      @dblclick="onMarkDblClick"
+      @contextmenu="onMarkContextMenu"
       @wheel.passive="onWheel"
       @touchstart.passive="onTouchStart"
       @touchend.passive="onTouchEnd"
@@ -958,6 +1173,8 @@ function onChanged(nb: Book) {
             :fmt-review="fmtReview"
             :img-src="imgSrc"
             :pdf-book-id="isPdf ? bookId : undefined"
+            :hl="hl"
+            :marks="marks.marksFor(pageSeg.index, pageSeg.paras)"
             @review="(pn: number, text?: string) => openReview(pageSeg!.index, pn, text)"
             @img-tap="(e: MouseEvent, img: ContentImage) => onImgTap(e, pageSeg!.index, img)"
             @img-load="measurePages"
@@ -1005,7 +1222,11 @@ function onChanged(nb: Book) {
       :chapters="chapters"
       :cur-index="curIndex"
       @go="goChapter"
+      :highlights="marks.list.value"
       @jump-bookmark="jumpBookmark"
+      @jump-highlight="jumpHighlight"
+      @note-highlight="openMarkNote"
+      @remove-highlight="removeMark"
       @jump-search="jumpSearchHit"
     />
 
@@ -1099,10 +1320,37 @@ function onChanged(nb: Book) {
       @press="textSel.markBarPressed()"
       @copy="copySelection"
       @bookmark="addBookmark"
+      @highlight="addHighlight"
       @replace="openReplace"
       @dict="openDict"
       @speak="speakSelection"
     />
+    <highlight-action-bar
+      v-if="markBar.show"
+      :x="markBar.x"
+      :y="markBar.y"
+      @style="openMarkStyle"
+      @note="openMarkNote()"
+      @rule="markToRule"
+      @copy="copyMark"
+      @remove="removeMark()"
+    />
+    <n-modal :show="!!markStyle" preset="card" :title="t('标注样式')" style="width: 480px; max-width: 94vw" @update:show="(v: boolean) => !v && closeMarkStyle()">
+      <highlight-style-editor v-if="markStyle" v-model="markStyle" />
+      <template #footer>
+        <n-space justify="end"><n-button type="primary" @click="closeMarkStyle">{{ t('完成') }}</n-button></n-space>
+      </template>
+    </n-modal>
+    <n-modal v-model:show="markNote.show" preset="card" :title="t('标注备注')" style="width: 420px; max-width: 94vw">
+      <n-input v-model:value="markNote.text" type="textarea" :autosize="{ minRows: 3, maxRows: 8 }" :placeholder="t('写点什么…')" />
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="markNote.show = false">{{ t('取消') }}</n-button>
+          <n-button type="primary" @click="saveMarkNote">{{ t('保存') }}</n-button>
+        </n-space>
+      </template>
+    </n-modal>
+    <highlight-rule-edit-modal v-model:rule="ruleDraft" is-new />
     <add-bookmark-modal v-model:draft="bookmarkDraft" :book-id="bookId" @saved="tocDrawer?.reloadBookmarks()" />
     <custom-theme-modal v-model:show="showThemeEditor" :theme="editingTheme" @saved="onThemeSaved" @deleted="onThemeDeleted" />
     <dict-modal v-model:show="showDict" :word="dictWord" />

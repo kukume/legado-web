@@ -314,7 +314,8 @@ fun Route.shelfRoutes(
                 if (key.length > 64) throw BadRequestException("key 过长")
                 if (key.startsWith("_")) throw BadRequestException("无效的 key")
                 val body = call.receiveText()
-                if (body.length > 64 * 1024) throw BadRequestException("内容过大")
+                val max = if (key == io.legado.web.service.HighlightRuleService.PREF_KEY) io.legado.web.service.HighlightRuleService.MAX_SIZE else 64 * 1024
+                if (body.length > max) throw BadRequestException("内容过大")
                 val uid = call.user.id
                 dbQuery {
                     UserPrefs.upsert {

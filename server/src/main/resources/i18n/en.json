@@ -69,6 +69,8 @@
   "txtTocRule.json 解析失败：{0}": "Couldn't parse txtTocRule.json: {0}",
   "有 {0} 条带 js 处理的目录规则需要“添加书源”的权限，已跳过": "Skipped {0} TOC rules with JS post-processing, which need the “add book sources” permission",
   "txtTocRule.json 导入失败：{0}": "Couldn't import txtTocRule.json: {0}",
+  "highlightRule.json 导入失败：{0}": "Couldn't import highlightRule.json: {0}",
+  "高亮规则过多": "Too many highlight rules",
   "replaceRule.json 解析失败：{0}": "Couldn't parse replaceRule.json: {0}",
   "sourceSub.json 解析失败：{0}": "Couldn't parse sourceSub.json: {0}",
   "跳过了 {0} 个非书源订阅（如 RSS 订阅）": "Skipped {0} subscriptions that aren't book sources (such as RSS)",
@@ -359,5 +361,11 @@
   "WebDAV 账号或密码错误（坚果云需使用“应用密码”）": "Incorrect WebDAV account or password (Jianguoyun requires an app password)",
   "没有权限（{0}）": "Permission denied ({0})",
   "路径不存在（{0}）": "Path not found ({0})",
-  "WebDAV {0} 失败：HTTP {1}": "WebDAV {0} failed: HTTP {1}"
+  "WebDAV {0} 失败：HTTP {1}": "WebDAV {0} failed: HTTP {1}",
+  "样式过长": "Style is too long",
+  "位置无效": "Invalid position",
+  "没有选中文字": "No text selected",
+  "标注不存在": "Highlight not found",
+  "highlight.json 解析失败：{0}": "Couldn't parse highlight.json: {0}",
+  "有 {0} 个标注对应的书不在书架上，已跳过": "Skipped {0} highlights whose books aren't on the bookshelf"
 }

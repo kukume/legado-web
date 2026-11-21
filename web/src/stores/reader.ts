@@ -126,6 +126,10 @@ export interface ReaderConfig {
   /** 标题上、下间距（em） */
   titleTop?: number
   titleBottom?: number
+  /** 是否使用高亮规则（见 utils/highlight），默认开启 */
+  highlight?: boolean
+  /** 点哪种方式打开手动标注的菜单（与 App 的“高亮操作唤起方式”相同），默认点击 */
+  highlightTrigger?: 'click' | 'dblclick' | 'longpress' | 'off'
   /** 设置版本，用于迁移旧的默认值 */
   version?: number
 }

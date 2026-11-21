@@ -206,10 +206,12 @@ const cloudColumns: DataTableColumns<WebDavFile> = [
           {{ t('书源：新增 {0}，更新 {1}', [summary.sourcesAdded, summary.sourcesUpdated]) }}<span v-if="summary.sourcesSkipped">{{ t('，跳过 {0}', [summary.sourcesSkipped]) }}</span>
         </div>
         <div v-if="parts.books && summary.bookmarksAdded">{{ t('书签：新增 {0}', [summary.bookmarksAdded]) }}</div>
+        <div v-if="parts.books && summary.highlightsAdded">{{ t('标注：新增 {0}', [summary.highlightsAdded]) }}</div>
         <div v-if="parts.rules">{{ t('替换规则：新增 {0}', [summary.rulesAdded]) }}</div>
         <div v-if="parts.rules && (summary.dictRulesImported || summary.tocRulesImported)">
           {{ t('字典规则：导入 {0} · TXT 目录规则：导入 {1}', [summary.dictRulesImported, summary.tocRulesImported]) }}
         </div>
+        <div v-if="parts.rules && summary.highlightRulesImported">{{ t('高亮规则：导入 {0}', [summary.highlightRulesImported]) }}</div>
         <div v-if="parts.subs">{{ t('书源订阅：新增 {0}', [summary.subsAdded]) }}</div>
         <ul v-if="summary.warnings.length" class="warn">
           <li v-for="(w, i) in summary.warnings" :key="i">{{ w }}</li>

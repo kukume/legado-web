@@ -7,7 +7,7 @@ import {
 } from 'naive-ui'
 import Sortable from 'sortablejs'
 import {
-  RefreshOutline, SearchOutline, AddOutline, GridOutline, ListOutline, EllipsisVertical, CloudUploadOutline, SwapVerticalOutline,
+  RefreshOutline, SearchOutline, GridOutline, ListOutline, EllipsisVertical, CloudUploadOutline, SwapVerticalOutline,
   CheckboxOutline, CheckmarkCircle,
 } from '@vicons/ionicons5'
 import BookCover from '@/components/BookCover.vue'
@@ -457,7 +457,6 @@ const icon = (c: any) => () => h(NIcon, null, { default: () => h(c) })
         </template>
         {{ t('导入本地书籍（EPUB、TXT、MOBI、AZW3、UMD、PDF，也可以直接拖到书架上）') }}
       </n-tooltip>
-      <n-button size="small" type="primary" :render-icon="icon(AddOutline)" @click="router.push('/search')">{{ t('找书') }}</n-button>
     </div>
 
     <div class="groups">
@@ -498,7 +497,7 @@ const icon = (c: any) => () => h(NIcon, null, { default: () => h(c) })
       <div v-if="viewMode === 'grid'" ref="gridEl" class="grid">
         <div v-for="b in shown" :key="b.id" class="grid-item" :class="{ selected: selected.has(b.id) }" @click="onBookClick(b)">
           <span v-if="selecting" class="check-mark"><n-icon :component="CheckmarkCircle" /></span>
-          <n-badge :value="b.lastCheckCount || unread(b)" :max="999" :show="unread(b) > 0" :type="b.lastCheckCount ? 'error' : 'info'" :offset="[-14, 6]">
+          <n-badge :value="b.lastCheckCount || unread(b)" :max="999" :show="unread(b) > 0" :type="b.lastCheckCount ? 'error' : 'info'">
             <book-cover :url="b.customCoverUrl || b.coverUrl" :name="b.name" :author="b.author" :origin="b.origin" />
           </n-badge>
           <div class="grid-title ellipsis-2">{{ b.name }}</div>
@@ -633,6 +632,17 @@ const icon = (c: any) => () => h(NIcon, null, { default: () => h(c) })
 
 .grid-item :deep(.n-badge) {
   display: block;
+}
+
+/*
+ * 未读数角标卡在封面右上角（稍微探出封面）。按右边缘对齐：naive-ui 按中心点定位，
+ * 数字位数不同时右边缘位置不同，一位数显得偏左、三位数探出很多
+ */
+.grid-item :deep(.n-badge .n-badge-sup) {
+  left: auto;
+  right: -4px;
+  top: -4px;
+  transform: none !important;
 }
 
 .grid-item:hover .cover {

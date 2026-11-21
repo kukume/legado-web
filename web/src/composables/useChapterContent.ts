@@ -1,6 +1,6 @@
 import type { Ref } from 'vue'
 import { shelfApi } from '@/api'
-import { isNetworkError } from '@/api/http'
+import { deviceOffline, isNetworkError } from '@/api/http'
 import type { Chapter, ChapterContent } from '@/api/types'
 import { getOfflineContent } from '@/offline/db'
 import { useOfflineStore } from '@/stores/offline'
@@ -78,7 +78,7 @@ export function useChapterContent(bookId: Ref<number>, chapters: Ref<Chapter[]>)
       }
       const ch = chapters.value[index]
       if (ch?.isVolume) return { index, title: ch.title, content: "", isVolume: true, cached: false }
-      if (isNetworkError(e)) throw new Error(t('当前离线，这一章还没有下载'))
+      if (isNetworkError(e)) throw new Error(deviceOffline() ? t('当前离线，这一章还没有下载') : t('连不上服务器，这一章也还没有离线下载'))
       throw e
     }
   }

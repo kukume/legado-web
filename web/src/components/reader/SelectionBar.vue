@@ -9,6 +9,8 @@ defineEmits<{
   press: []
   copy: []
   bookmark: []
+  /** 添加手动标注 */
+  highlight: []
   replace: []
   dict: []
   /** 从选中处开始朗读 */
@@ -32,6 +34,7 @@ watch(() => props.x, () => nextTick(clamp))
 <template>
   <div ref="el" class="sel-bar" :style="{ left: `${left}px`, top: `${y}px` }" @pointerdown.prevent="$emit('press')" @click.stop>
     <button @click="$emit('copy')">{{ t('复制') }}</button>
+    <button @click="$emit('highlight')">{{ t('高亮') }}</button>
     <button @click="$emit('bookmark')">{{ t('书签') }}</button>
     <button @click="$emit('replace')">{{ t('替换') }}</button>
     <button @click="$emit('dict')">{{ t('字典') }}</button>

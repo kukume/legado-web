@@ -1,7 +1,7 @@
 import { ApiError, getToken, http, NetworkError, streamNdjson } from './http'
 import { locale } from '@/i18n'
 import type {
-  Book, BookGroup, Bookmark, BookSearchResult, ReadingSummary, LocalBookInfo, TtsEngine, TtsEngineConfig, Chapter, ChapterContent, ExploreKind, ImportResult, Invite, LoginConfig,
+  Book, BookGroup, BookHighlight, Bookmark, BookSearchResult, ReadingSummary, LocalBookInfo, TtsEngine, TtsEngineConfig, Chapter, ChapterContent, ExploreKind, ImportResult, Invite, LoginConfig,
   LoginV2Render, Me, PublicConfig, ReplaceRule, SearchBook, SourceSummary, Subscription, User,
   DictRule, TxtTocRule, ZlibStatus, ZlibBook, ZlibJob, ZlibAccount, LocalArchiveResult,
 } from './types'
@@ -380,7 +380,10 @@ export interface BackupImportSummary {
   rulesAdded: number
   dictRulesImported: number
   tocRulesImported: number
+  /** 导入（按 uuid 覆盖）的高亮规则数 */
+  highlightRulesImported?: number
   bookmarksAdded?: number
+  highlightsAdded?: number
   subsAdded: number
   files: string[]
   warnings: string[]
@@ -435,6 +438,14 @@ export const bookmarkApi = {
     http.post<Bookmark>(`/api/shelf/${bookId}/bookmarks`, b),
   update: (id: number, content: string) => http.put(`/api/bookmarks/${id}`, { content }),
   remove: (ids: number[]) => http.post('/api/bookmarks/delete', { ids }),
+}
+
+export const bookHighlightApi = {
+  list: (bookId: number) => http.get<BookHighlight[]>(`/api/shelf/${bookId}/highlights`),
+  add: (bookId: number, h: Pick<BookHighlight, 'chapterIndex' | 'chapterName' | 'chapterPos' | 'chapterPosEnd' | 'bookText' | 'style' | 'note'>) =>
+    http.post<BookHighlight>(`/api/shelf/${bookId}/highlights`, h),
+  update: (id: number, h: Partial<Pick<BookHighlight, 'style' | 'note' | 'chapterPos' | 'chapterPosEnd'>>) => http.put(`/api/highlights/${id}`, h),
+  remove: (ids: number[]) => http.post('/api/highlights/delete', { ids }),
 }
 
 /** 阅读字体（用户上传，在所有设备上可用） */

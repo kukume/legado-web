@@ -45,7 +45,15 @@ export class NetworkError extends ApiError {
 }
 
 export function isNetworkError(e: unknown): boolean {
-  return e instanceof NetworkError || (typeof navigator !== 'undefined' && navigator.onLine === false)
+  return e instanceof NetworkError || deviceOffline()
+}
+
+/**
+ * 本机确实断网（而不是本机联网、但服务器或反向代理不可达）。
+ * 两种情况都按离线处理，但提示要区分：后者说“当前离线”会让人以为是自己的网络问题
+ */
+export function deviceOffline(): boolean {
+  return typeof navigator !== 'undefined' && navigator.onLine === false
 }
 
 type Handler = () => void

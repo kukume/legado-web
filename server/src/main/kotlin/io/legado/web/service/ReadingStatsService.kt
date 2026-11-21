@@ -32,7 +32,7 @@ data class ReadingSummary(
     val totalDays: Int,
     /** from 起每一天的统计（没有阅读的日子不返回） */
     val days: List<DayStat>,
-    /** 阅读时间最长的书 */
+    /** 阅读时间最长的书（不含已删除的书） */
     val books: List<BookStat>,
 )
 
@@ -81,17 +81,20 @@ class ReadingStatsService {
                 .sortedBy { it.day }
             val byBook = rows.groupBy { it[ReadingStats.bookId] }
                 .mapValues { (_, rs) -> rs.sumOf { it[ReadingStats.seconds] } to rs.sumOf { it[ReadingStats.chars] } }
-            val top = byBook.entries.sortedByDescending { it.value.first }.take(10)
-            val names = if (top.isEmpty()) emptyMap() else Books.select(Books.id, Books.name, Books.author)
-                .where { (Books.userId eq userId) and (Books.id inList top.map { it.key }) }
-                .associate { it[Books.id].value to (it[Books.name] to it[Books.author]) }
+            // 排行只列还存在的书：已删除的书不显示，名额由后面的书补上（总时长、日历仍包含已删除的书）
+            val names = byBook.keys.chunked(500).flatMap { part ->
+                Books.select(Books.id, Books.name, Books.author)
+                    .where { (Books.userId eq userId) and (Books.id inList part) }
+                    .map { it[Books.id].value to (it[Books.name] to it[Books.author]) }
+            }.toMap()
+            val top = byBook.entries.filter { it.key in names }.sortedByDescending { it.value.first }.take(10)
             ReadingSummary(
                 totalSeconds = rows.sumOf { it[ReadingStats.seconds] },
                 totalChars = rows.sumOf { it[ReadingStats.chars] },
                 totalDays = rows.map { it[ReadingStats.day] }.distinct().size,
                 days = days,
                 books = top.map { (id, v) ->
-                    val (name, author) = names[id] ?: ("（已删除的书）" to "")
+                    val (name, author) = names.getValue(id)
                     BookStat(id, name, author, v.first, v.second)
                 },
             )
