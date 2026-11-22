@@ -55,6 +55,16 @@ export const readerThemes: ReaderTheme[] = [
   { key: 'night', name: t('夜间'), bg: '#141414', text: '#8f8a80', panel: '#1f1f1f', desk: '#0a0a0a' },
 ]
 
+/** 按 key 找主题（内置或自定义），找不到时返回 undefined */
+export function findTheme(c: ReaderConfig, key?: string): ReaderTheme | undefined {
+  if (!key) return undefined
+  const custom = c.customThemes?.find((x) => customThemeKey(x.id) === key)
+  return custom ? customToTheme(custom) : readerThemes.find((th) => th.key === key)
+}
+
+/** 是否为深色主题（按背景色判断） */
+export const isDarkTheme = (th: ReaderTheme) => !isLight(th.bg)
+
 export const readerFonts = [
   { label: t('系统默认'), value: 'system' },
   { label: t('宋体 / 衬线'), value: 'serif' },
@@ -86,8 +96,12 @@ export interface ReaderConfig {
   theme: string
   /** 自定义主题 */
   customThemes?: CustomTheme[]
-  /** 切到夜间前使用的主题（切回日间时恢复） */
+  /** 最近使用的浅色主题（切回日间、跟随系统切到浅色时恢复） */
   dayTheme?: string
+  /** 最近使用的深色主题（跟随系统切到深色时使用） */
+  nightTheme?: string
+  /** 系统切换深浅色模式时：ask 提示是否切换正文主题（默认）；auto 自动切换；off 不处理 */
+  followSystem?: 'ask' | 'auto' | 'off'
   fontSize: number
   lineHeight: number
   paragraphSpacing: number

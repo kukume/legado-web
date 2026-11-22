@@ -38,6 +38,13 @@ const triggerOptions = computed(() => [
   { value: 'off', label: t('关闭') },
 ])
 
+/** 系统切换深浅色模式时怎么处理正文主题（见 useThemeFollow） */
+const followOptions = computed(() => [
+  { value: 'ask', label: t('提示') },
+  { value: 'auto', label: t('自动切换') },
+  { value: 'off', label: t('关闭') },
+])
+
 // ---------------- 字体：预设字体 + 用户上传的字体 ----------------
 
 const message = useMessage()
@@ -129,6 +136,11 @@ function removeFont(f: UserFont) {
             >{{ c.name }}</button>
             <button v-if="customThemes.length < 10" class="theme-btn theme-add" :title="t('自定义主题')" @click="$emit('newTheme')">{{ t('＋ 自定义') }}</button>
           </div>
+        </div>
+        <div class="set-row">
+          <label>{{ t('日夜主题跟随系统') }}</label>
+          <n-select size="small" style="width: 120px" :value="cfg.followSystem ?? 'ask'" :options="followOptions"
+            @update:value="(v: 'ask' | 'auto' | 'off') => (cfg.followSystem = v)" />
         </div>
         <div class="set-row">
           <label>{{ t('翻页方式') }}</label>

@@ -2,7 +2,8 @@
 import { goBack } from '@/utils/navigation'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NButton, NIcon, NInput, NModal, NSpace, NSpin, useMessage } from 'naive-ui'
+import { NButton, NConfigProvider, NIcon, NInput, NModal, NSpace, NSpin, darkTheme, useMessage, type GlobalThemeOverrides } from 'naive-ui'
+import { isLight } from '@/utils/color'
 import { ChevronBackOutline, ChevronForwardOutline } from '@vicons/ionicons5'
 import { searchApi, shelfApi, toOpenRequest } from '@/api'
 import QuickReplaceModal from '@/components/QuickReplaceModal.vue'
@@ -27,6 +28,8 @@ import ReaderTocDrawer from '@/components/reader/ReaderTocDrawer.vue'
 import ReaderSettingsDrawer from '@/components/reader/ReaderSettingsDrawer.vue'
 import AutoReadBar from '@/components/reader/AutoReadBar.vue'
 import SelectionBar from '@/components/reader/SelectionBar.vue'
+import ThemeFollowBar from '@/components/reader/ThemeFollowBar.vue'
+import { useThemeFollow } from '@/composables/useThemeFollow'
 import AddBookmarkModal from '@/components/reader/AddBookmarkModal.vue'
 import type { BookmarkDraft, Segment } from '@/components/reader/types'
 import { deviceOffline, getClientId, getToken, isNetworkError, proxyImage } from '@/api/http'
@@ -92,6 +95,24 @@ const theme = computed(() =>
   currentCustom.value ? customToTheme(currentCustom.value) : readerThemes.find((th) => th.key === cfg.value.theme) ?? readerThemes[0],
 )
 
+/**
+ * 正文、菜单、朗读面板等画在正文主题颜色上的组件，按正文主题的深浅选 naive-ui 主题：
+ * 系统深色模式下用浅色正文主题（羊皮纸、白色等）时，按钮文字仍是深色，不会浅字配浅底看不清；反之亦然
+ */
+const readerDark = computed(() => !isLight(theme.value.bg))
+const readerUiTheme = computed(() => (readerDark.value ? darkTheme : null))
+const readerUiOverrides = computed<GlobalThemeOverrides>(() => {
+  const d = readerDark.value
+  return {
+    common: {
+      primaryColor: d ? '#d4a15c' : '#9c6b30',
+      primaryColorHover: d ? '#e0b374' : '#b07c3c',
+      primaryColorPressed: d ? '#b98945' : '#83581f',
+      primaryColorSuppl: d ? '#d4a15c' : '#9c6b30',
+    },
+  }
+})
+
 // ---- 自定义主题的编辑 ----
 const showThemeEditor = ref(false)
 const editingTheme = ref<CustomTheme | null>(null)
@@ -112,16 +133,10 @@ function onThemeSaved(c: CustomTheme) {
   cfg.value.theme = customThemeKey(c.id)
 }
 /** 夜间 / 日间切换：记住切到夜间前的主题（可能是自定义主题），切回时恢复 */
-function toggleNight() {
-  if (cfg.value.theme === 'night') {
-    const day = cfg.value.dayTheme
-    const valid = day && (readerThemes.some((th) => th.key === day) || customThemes.value.some((c) => customThemeKey(c.id) === day))
-    cfg.value.theme = valid ? day! : 'paper'
-  } else {
-    cfg.value.dayTheme = cfg.value.theme
-    cfg.value.theme = 'night'
-  }
-}
+/** 系统切换深浅色模式时提示（或自动）切换正文主题 */
+const themeFollow = useThemeFollow(cfg)
+/** 日间 / 夜间按钮：在最近使用的浅色、深色主题之间切换 */
+const toggleNight = () => themeFollow.toggle()
 function onThemeDeleted(id: string) {
   cfg.value.customThemes = customThemes.value.filter((c) => c.id !== id)
   if (cfg.value.theme === customThemeKey(id)) cfg.value.theme = 'paper'
@@ -886,7 +901,8 @@ onMounted(async () => {
   window.addEventListener('keydown', onKey)
   window.addEventListener('resize', onResize)
   window.addEventListener('beforeunload', onBeforeUnload)
-  readerStore.loadRemote()
+  // 阅读设置从服务器加载完再检测深浅色模式的变化
+  readerStore.loadRemote().then(() => themeFollow.start())
   try {
     let b: Book
     let c: Chapter[]
@@ -1122,97 +1138,99 @@ function onChanged(nb: Book) {
     @touchstart.self.passive="onTouchStart"
     @touchend.self.passive="onTouchEnd"
   >
-    <div v-if="loadingInit" class="center"><n-spin /></div>
+    <n-config-provider abstract :theme="readerUiTheme" :theme-overrides="readerUiOverrides">
+      <div v-if="loadingInit" class="center"><n-spin /></div>
 
-    <!-- 滚动模式 -->
-    <div v-if="mode === 'scroll' && !loadingInit" ref="scroller" class="scroller" @scroll.passive="onScroll" @touchstart.passive="onScrollerTouchStart" @touchend.passive="onScrollerTouchEnd" @touchcancel.passive="onScrollerTouchEnd" @click="onTap" @dblclick="onMarkDblClick" @contextmenu="onMarkContextMenu">
-      <div class="paper">
-        <article v-for="seg in segments" :key="seg.index" :ref="(el) => setSegRef(seg.index, el)" class="chapter">
-          <chapter-body
-            :seg="seg"
-            :review-count="reviewCount"
-            :fmt-review="fmtReview"
-            :img-src="imgSrc"
-            :pdf-book-id="isPdf ? bookId : undefined"
-            :hl="hl"
-            :marks="marks.marksFor(seg.index, seg.paras)"
-            scroll-mode
-            @review="(pn: number, text?: string) => openReview(seg.index, pn, text)"
-            @img-tap="(e: MouseEvent, img: ContentImage) => onImgTap(e, seg.index, img)"
-            @reload="reloadChapter"
-            @change-source="showChange = true"
-          />
-        </article>
-        <div class="chapter-end muted-r">
-          <n-spin v-if="loadingMore && !segments[segments.length - 1]?.loading" size="small" />
-          <span v-else-if="segments.length && segments[segments.length - 1].index >= chapters.length - 1">{{ t('— 全书完 —') }}</span>
+      <!-- 滚动模式 -->
+      <div v-if="mode === 'scroll' && !loadingInit" ref="scroller" class="scroller" @scroll.passive="onScroll" @touchstart.passive="onScrollerTouchStart" @touchend.passive="onScrollerTouchEnd" @touchcancel.passive="onScrollerTouchEnd" @click="onTap" @dblclick="onMarkDblClick" @contextmenu="onMarkContextMenu">
+        <div class="paper">
+          <article v-for="seg in segments" :key="seg.index" :ref="(el) => setSegRef(seg.index, el)" class="chapter">
+            <chapter-body
+              :seg="seg"
+              :review-count="reviewCount"
+              :fmt-review="fmtReview"
+              :img-src="imgSrc"
+              :pdf-book-id="isPdf ? bookId : undefined"
+              :hl="hl"
+              :marks="marks.marksFor(seg.index, seg.paras)"
+              scroll-mode
+              @review="(pn: number, text?: string) => openReview(seg.index, pn, text)"
+              @img-tap="(e: MouseEvent, img: ContentImage) => onImgTap(e, seg.index, img)"
+              @reload="reloadChapter"
+              @change-source="showChange = true"
+            />
+          </article>
+          <div class="chapter-end muted-r">
+            <n-spin v-if="loadingMore && !segments[segments.length - 1]?.loading" size="small" />
+            <span v-else-if="segments.length && segments[segments.length - 1].index >= chapters.length - 1">{{ t('— 全书完 —') }}</span>
+          </div>
         </div>
       </div>
-    </div>
 
-    <!-- 翻页模式 -->
-    <div
-      v-if="isPaged && !loadingInit"
-      ref="pager"
-      class="pager"
-      :class="{ vertical: isVertical, double: isDouble }"
-      @click="onTap"
-      @dblclick="onMarkDblClick"
-      @contextmenu="onMarkContextMenu"
-      @wheel.passive="onWheel"
-      @touchstart.passive="onTouchStart"
-      @touchend.passive="onTouchEnd"
-    >
-      <div v-if="pageLoading" class="center"><n-spin /></div>
-      <div v-show="!pageLoading" ref="pageClip" class="page-clip" :style="clipStyle">
-        <div ref="columns" class="columns" :style="columnStyle">
-          <chapter-body
-            v-if="pageSeg"
-            :seg="pageSeg"
-            :review-count="reviewCount"
-            :fmt-review="fmtReview"
-            :img-src="imgSrc"
-            :pdf-book-id="isPdf ? bookId : undefined"
-            :hl="hl"
-            :marks="marks.marksFor(pageSeg.index, pageSeg.paras)"
-            @review="(pn: number, text?: string) => openReview(pageSeg!.index, pn, text)"
-            @img-tap="(e: MouseEvent, img: ContentImage) => onImgTap(e, pageSeg!.index, img)"
-            @img-load="measurePages"
-            @reload="reloadChapter"
-          />
+      <!-- 翻页模式 -->
+      <div
+        v-if="isPaged && !loadingInit"
+        ref="pager"
+        class="pager"
+        :class="{ vertical: isVertical, double: isDouble }"
+        @click="onTap"
+        @dblclick="onMarkDblClick"
+        @contextmenu="onMarkContextMenu"
+        @wheel.passive="onWheel"
+        @touchstart.passive="onTouchStart"
+        @touchend.passive="onTouchEnd"
+      >
+        <div v-if="pageLoading" class="center"><n-spin /></div>
+        <div v-show="!pageLoading" ref="pageClip" class="page-clip" :style="clipStyle">
+          <div ref="columns" class="columns" :style="columnStyle">
+            <chapter-body
+              v-if="pageSeg"
+              :seg="pageSeg"
+              :review-count="reviewCount"
+              :fmt-review="fmtReview"
+              :img-src="imgSrc"
+              :pdf-book-id="isPdf ? bookId : undefined"
+              :hl="hl"
+              :marks="marks.marksFor(pageSeg.index, pageSeg.paras)"
+              @review="(pn: number, text?: string) => openReview(pageSeg!.index, pn, text)"
+              @img-tap="(e: MouseEvent, img: ContentImage) => onImgTap(e, pageSeg!.index, img)"
+              @img-load="measurePages"
+              @reload="reloadChapter"
+            />
+          </div>
+        </div>
+        <div class="page-foot muted-r">
+          <span class="ellipsis">{{ curTitle }}</span>
+          <span>{{ page + 1 }} / {{ pageCount }}</span>
         </div>
       </div>
-      <div class="page-foot muted-r">
-        <span class="ellipsis">{{ curTitle }}</span>
-        <span>{{ page + 1 }} / {{ pageCount }}</span>
-      </div>
-    </div>
 
-    <reader-menu
-      :visible="menuVisible"
-      :book="book"
-      :chapters="chapters"
-      :cur-index="curIndex"
-      :cur-title="curTitle"
-      :progress-percent="progressPercent"
-      :reloading="reloading"
-      :is-comic="isComic"
-      :is-fullscreen="isFullscreen"
-      :is-night="cfg.theme === 'night'"
-      :theme-bg="theme.bg"
-      @back="goBack(router, { name: 'shelf' })"
-      @reload="reloadChapter"
-      @change-source="showChange = true"
-      @info="router.push({ name: 'book', params: { id: bookId } })"
-      @prev-chapter="prevChapter"
-      @next-chapter="nextChapter"
-      @go-chapter="goChapter"
-      @toc="showToc = true"
-      @settings="showSettings = true"
-      @read-aloud="tts.active ? (menuVisible = false) : ttsStart()"
-      @fullscreen="toggleFullscreen"
-      @night="toggleNight"
-    />
+      <reader-menu
+        :visible="menuVisible"
+        :book="book"
+        :chapters="chapters"
+        :cur-index="curIndex"
+        :cur-title="curTitle"
+        :progress-percent="progressPercent"
+        :reloading="reloading"
+        :is-comic="isComic"
+        :is-fullscreen="isFullscreen"
+        :is-night="readerDark"
+        :theme-bg="theme.bg"
+        @back="goBack(router, { name: 'shelf' })"
+        @reload="reloadChapter"
+        @change-source="showChange = true"
+        @info="router.push({ name: 'book', params: { id: bookId } })"
+        @prev-chapter="prevChapter"
+        @next-chapter="nextChapter"
+        @go-chapter="goChapter"
+        @toc="showToc = true"
+        @settings="showSettings = true"
+        @read-aloud="tts.active ? (menuVisible = false) : ttsStart()"
+        @fullscreen="toggleFullscreen"
+        @night="toggleNight"
+      />
+    </n-config-provider>
 
     <reader-toc-drawer
       ref="tocDrawer"
@@ -1254,29 +1272,31 @@ function onChanged(nb: Book) {
 
     <change-source-modal v-model:show="showChange" :book="book" @changed="onChanged" />
     <image-viewer v-model:show="showViewer" :src="viewerSrc" />
-    <read-aloud-panel
-      v-if="tts.active"
-      :state="tts.state"
-      :engine="cfg.ttsEngine || 'browser'"
-      :rate="cfg.ttsRate || 1"
-      :voice="cfg.ttsVoice || ''"
-      :engines="ttsEngines"
-      :voices="ttsVoices"
-      :browser-supported="browserTts"
-      :text="tts.text"
-      :error="tts.error"
-      :bg="theme.panel"
-      :fg="theme.text"
-      :title="ttsEngineName"
-      @toggle="ttsToggle"
-      @stop="ttsStop"
-      @prev="ttsSkip(-1)"
-      @next="ttsSkip(1)"
-      @update:engine="(v: string) => (readerStore.config.ttsEngine = v)"
-      @update:rate="(v: number) => (readerStore.config.ttsRate = v)"
-      @update:voice="(v: string) => (readerStore.config.ttsVoice = v)"
-      @manage-engines="showTtsEngines = true"
-    />
+    <n-config-provider abstract :theme="readerUiTheme" :theme-overrides="readerUiOverrides">
+      <read-aloud-panel
+        v-if="tts.active"
+        :state="tts.state"
+        :engine="cfg.ttsEngine || 'browser'"
+        :rate="cfg.ttsRate || 1"
+        :voice="cfg.ttsVoice || ''"
+        :engines="ttsEngines"
+        :voices="ttsVoices"
+        :browser-supported="browserTts"
+        :text="tts.text"
+        :error="tts.error"
+        :bg="theme.panel"
+        :fg="theme.text"
+        :title="ttsEngineName"
+        @toggle="ttsToggle"
+        @stop="ttsStop"
+        @prev="ttsSkip(-1)"
+        @next="ttsSkip(1)"
+        @update:engine="(v: string) => (readerStore.config.ttsEngine = v)"
+        @update:rate="(v: number) => (readerStore.config.ttsRate = v)"
+        @update:voice="(v: string) => (readerStore.config.ttsVoice = v)"
+        @manage-engines="showTtsEngines = true"
+      />
+    </n-config-provider>
     <!-- 朗读引擎管理（与 App 一样从朗读设置进入），关闭后刷新引擎列表 -->
     <n-modal
       v-model:show="showTtsEngines"
@@ -1289,17 +1309,19 @@ function onChanged(nb: Book) {
       <tts-engine-manager />
     </n-modal>
 
-    <review-drawer
-      v-if="reviewTarget"
-      v-model:show="reviewOpen"
-      :book-id="bookId"
-      :chapter-index="reviewTarget.chapterIndex"
-      :para="reviewTarget.para"
-      :para-data="reviewTarget.paraData"
-      :total="reviewTarget.total"
-      :excerpt="reviewTarget.excerpt"
-      :theme="theme"
-    />
+    <n-config-provider abstract :theme="readerUiTheme" :theme-overrides="readerUiOverrides">
+      <review-drawer
+        v-if="reviewTarget"
+        v-model:show="reviewOpen"
+        :book-id="bookId"
+        :chapter-index="reviewTarget.chapterIndex"
+        :para="reviewTarget.para"
+        :para-data="reviewTarget.paraData"
+        :total="reviewTarget.total"
+        :excerpt="reviewTarget.excerpt"
+        :theme="theme"
+      />
+    </n-config-provider>
     <key-bindings-modal v-model:show="showKeys" v-model:value="cfg.keys" />
 
     <auto-read-bar
@@ -1324,6 +1346,14 @@ function onChanged(nb: Book) {
       @replace="openReplace"
       @dict="openDict"
       @speak="speakSelection"
+    />
+    <theme-follow-bar
+      v-if="themeFollow.prompt.value !== null"
+      :dark="themeFollow.prompt.value"
+      @switch="themeFollow.switchNow"
+      @always="themeFollow.always"
+      @never="themeFollow.never"
+      @close="themeFollow.dismiss"
     />
     <highlight-action-bar
       v-if="markBar.show"
