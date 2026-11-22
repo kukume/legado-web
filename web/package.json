@@ -14,20 +14,20 @@
   "dependencies": {
     "@cap.js/wasm": "0.0.8",
     "@vicons/ionicons5": "^0.13.0",
-    "cap-widget": "0.1.62",
+    "cap-widget": "0.1.63",
     "hls.js": "^1.7.4",
-    "marked": "^18.2.0",
+    "marked": "^18.2.1",
     "naive-ui": "^2.45.3",
     "pdfjs-dist": "^6.5.438",
     "pinia": "^4.1.0",
     "sortablejs": "^1.15.7",
-    "vue": "^3.5.45",
-    "vue-router": "^5.5.0"
+    "vue": "^3.5.46",
+    "vue-router": "^5.5.1"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
     "@types/sortablejs": "^1.15.9",
-    "@vitejs/plugin-vue": "^6.0.10",
+    "@vitejs/plugin-vue": "^6.0.11",
     "opencc-js": "1.4.2",
     "sharp": "^0.35.5",
     "typescript": "^6.0.3",

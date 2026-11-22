@@ -66,7 +66,7 @@ ktor {
 // 将前端构建产物打包进 jar：./gradlew :server:buildFatJar -PwithWeb
 val webDist = rootProject.layout.projectDirectory.dir("web/dist")
 if (project.hasProperty("withWeb")) {
-    val buildWeb by tasks.registering(Exec::class) {
+    val buildWeb = tasks.register<Exec>("buildWeb") {
         workingDir = rootProject.file("web")
         val npm = if (System.getProperty("os.name").lowercase().contains("win")) "npm.cmd" else "npm"
         commandLine(npm, "run", "build")
