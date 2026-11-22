@@ -288,7 +288,10 @@ fun Application.module() {
         }
 
         // 前端：优先使用外部目录（legado.webDir），否则使用打包进 jar 的静态资源
-        val webDir = environment.config.propertyOrNull("legado.webDir")?.getString()?.takeIf { File(it).isDirectory }
+        // 没设置时配置值是空字符串：JDK 25 起 File("") 表示当前目录（isDirectory 为 true），必须先排除空值，
+        // 否则会把工作目录（容器里是 /app）当成前端目录，所有页面 404
+        val webDir = environment.config.propertyOrNull("legado.webDir")?.getString()
+            ?.takeIf { it.isNotBlank() && File(it).isDirectory }
         singlePageApplication {
             if (webDir != null) {
                 filesPath = webDir
