@@ -23,10 +23,38 @@ let lastCheck = Date.now()
 function checkUpdate() {
   if (!registration || !navigator.onLine) return
   lastCheck = Date.now()
-  registration.update().catch(() => {})
+  const r = registration
+  r.update().then(() => checkWaiting(r)).catch(() => {})
 }
 
-const { needRefresh, updateServiceWorker } = useRegisterSW({
+/**
+ * 新版本已下载好（在等待接管页面）时提示刷新。
+ * 不只依赖 workbox-window 的事件：页面打开超过 1 分钟后发现的更新它当作“外部更新”，
+ * 而且只处理一次，之后再有新版本就不提示了；安卓安装的应用常驻后台几天不重新加载，正好碰上。
+ * 用户关掉提示后，下次检查（切回应用）时再提示
+ */
+function checkWaiting(r: ServiceWorkerRegistration) {
+  if (r.waiting && navigator.serviceWorker.controller && !needRefresh.value) needRefresh.value = true
+}
+
+/** 让新版本接管页面后刷新：新版本接管（controllerchange）时重新加载 */
+let reloading = false
+function applyUpdate() {
+  const waiting = registration?.waiting
+  if (!waiting) {
+    // 已经被别的窗口激活了，直接刷新就是新版本
+    location.reload()
+    return
+  }
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloading) return
+    reloading = true
+    location.reload()
+  })
+  waiting.postMessage({ type: 'SKIP_WAITING' })
+}
+
+const { needRefresh } = useRegisterSW({
   immediate: true,
   onRegisteredSW(_url, r) {
     registration = r
@@ -34,11 +62,20 @@ const { needRefresh, updateServiceWorker } = useRegisterSW({
     setInterval(checkUpdate, CHECK_INTERVAL_MS)
     // 发现新版本就先提示（新版本的文件下载完之前还不能刷新，下载完再换成“立即刷新”）；
     // 没有旧版本在控制页面时是第一次安装，不提示
-    r.addEventListener('updatefound', () => {
-      if (navigator.serviceWorker.controller) showPreparing()
-    })
+    const track = () => {
+      const sw = r.installing
+      if (!sw || !navigator.serviceWorker.controller) return
+      showPreparing()
+      // 新版本下载完成（installed）后进入等待，提示刷新
+      sw.addEventListener('statechange', () => {
+        if (sw.state === 'installed') checkWaiting(r)
+      })
+    }
+    r.addEventListener('updatefound', track)
     // 页面打开时浏览器可能已经在下载新版本（事件在注册完成前就触发了）
-    if (r.installing && navigator.serviceWorker.controller) showPreparing()
+    track()
+    // 上次打开时已经下载好、还没刷新的新版本
+    checkWaiting(r)
   },
 })
 
@@ -69,7 +106,7 @@ watch(needRefresh, (v) => {
     title: t('新版本已准备好'),
     content: t('刷新后生效。'),
     action: () =>
-      h(NButton, { size: 'small', type: 'primary', onClick: () => { n.destroy(); updateServiceWorker(true) } }, () => t('立即刷新')),
+      h(NButton, { size: 'small', type: 'primary', onClick: () => { n.destroy(); applyUpdate() } }, () => t('立即刷新')),
     onClose: () => { needRefresh.value = false },
   })
 })
@@ -109,6 +146,9 @@ onMounted(() => {
   window.addEventListener('online', onOnline)
   window.addEventListener('offline', onOffline)
   document.addEventListener('visibilitychange', onVisible)
+  // 安卓安装的应用从后台切回时不一定触发 visibilitychange，回到前台的其它事件也检查一次
+  window.addEventListener('focus', onVisible)
+  window.addEventListener('pageshow', onVisible)
   timer = setInterval(probe, 30_000)
   setTimeout(() => sync(true), 3000)
 })
@@ -117,6 +157,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('online', onOnline)
   window.removeEventListener('offline', onOffline)
   document.removeEventListener('visibilitychange', onVisible)
+  window.removeEventListener('focus', onVisible)
+  window.removeEventListener('pageshow', onVisible)
   if (timer) clearInterval(timer)
 })
 </script>
