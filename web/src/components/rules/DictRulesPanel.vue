@@ -2,6 +2,7 @@
 import { useIsMobile } from '@/composables/useIsMobile'
 import { mobileColumns, useSelectAll } from '@/utils/mobileTable'
 import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useReactivated } from '@/composables/useReactivated'
 import Sortable from 'sortablejs'
 import { ReorderThreeOutline } from '@vicons/ionicons5'
 import {
@@ -26,8 +27,8 @@ const canEdit = ref(false)
 const loading = ref(false)
 const checked = ref<string[]>([])
 
-async function load() {
-  loading.value = true
+async function load(quiet = false) {
+  if (!quiet) loading.value = true
   try {
     const r = await dictApi.list()
     rules.value = r.rules
@@ -38,7 +39,9 @@ async function load() {
     loading.value = false
   }
 }
-onMounted(load)
+onMounted(() => load())
+// 规则页有缓存：回到页面时静默刷新（在阅读页等其它地方可能改过规则）
+useReactivated(() => load(true))
 
 const blank = (): DictRule => ({
   name: '', urlRule: '', showRule: '', enabled: true,

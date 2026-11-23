@@ -2,6 +2,7 @@
 import { useIsMobile } from '@/composables/useIsMobile'
 import { mobileColumns, useSelectAll } from '@/utils/mobileTable'
 import { computed, h, onMounted, ref } from 'vue'
+import { useReactivated } from '@/composables/useReactivated'
 import {
   NAlert, NButton, NCheckbox, NDataTable, NForm, NFormItem, NInput, NInputNumber, NModal, NSpace, NSwitch, NTag,
   useDialog, useMessage, type DataTableColumns,
@@ -21,8 +22,8 @@ const canEdit = ref(false)
 const loading = ref(false)
 const checked = ref<number[]>([])
 
-async function load() {
-  loading.value = true
+async function load(quiet = false) {
+  if (!quiet) loading.value = true
   try {
     const r = await txtTocApi.list()
     rules.value = r.rules
@@ -33,7 +34,9 @@ async function load() {
     loading.value = false
   }
 }
-onMounted(load)
+onMounted(() => load())
+// 规则页有缓存：回到页面时静默刷新（在阅读页等其它地方可能改过规则）
+useReactivated(() => load(true))
 
 const blank = (): TxtTocRule => ({
   id: 0, name: '', rule: '', replacement: '', example: '', enable: true,

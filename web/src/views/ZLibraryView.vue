@@ -13,6 +13,7 @@ import {
 import { zlibApi } from '@/api'
 import type { ZlibStatus, ZlibBook, ZlibJob, ZlibAccount } from '@/api/types'
 import { locale, t } from '@/i18n'
+import { useReactivated } from '@/composables/useReactivated'
 import { useZlibStore } from '@/stores/zlib'
 
 defineOptions({ name: 'ZLibraryView' })
@@ -183,6 +184,11 @@ onMounted(() => {
   zlib.refresh()
 })
 onUnmounted(offFinished)
+// 页面有缓存（保留搜索结果）：回到页面时刷新下载任务和额度
+useReactivated(() => {
+  zlib.refresh()
+  loadAccount()
+})
 </script>
 
 <template>

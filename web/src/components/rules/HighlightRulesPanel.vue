@@ -2,6 +2,7 @@
 import { useIsMobile } from '@/composables/useIsMobile'
 import { mobileColumns, useSelectAll } from '@/utils/mobileTable'
 import { computed, h, onMounted, ref } from 'vue'
+import { useReactivated } from '@/composables/useReactivated'
 import {
   NButton, NCheckbox, NDataTable, NInput, NModal, NSelect, NSpace, NSwitch, NTag,
   useDialog, useMessage, type DataTableColumns,
@@ -45,8 +46,8 @@ const shown = computed(() => {
   return ordered.value.filter((r) => (g === NO_GROUP ? !r.group : r.group === g))
 })
 
-async function load() {
-  loading.value = true
+async function load(quiet = false) {
+  if (!quiet) loading.value = true
   try {
     await store.load(true)
   } catch (e: any) {
@@ -55,7 +56,9 @@ async function load() {
     loading.value = false
   }
 }
-onMounted(load)
+onMounted(() => load())
+// 规则页有缓存：回到页面时静默刷新（在阅读页等其它地方可能改过规则）
+useReactivated(() => load(true))
 
 async function saveAll(list: HighlightRule[]) {
   try {

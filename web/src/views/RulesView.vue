@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { onActivated, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NTab, NTabs } from 'naive-ui'
 import ReplaceRulesPanel from '@/components/rules/ReplaceRulesPanel.vue'
@@ -13,10 +13,22 @@ const route = useRoute()
 const router = useRouter()
 const tabs = ['replace', 'highlight', 'dict', 'txtToc'] as const
 type Tab = (typeof tabs)[number]
-const tab = computed<Tab>(() => (tabs as readonly string[]).includes(String(route.query.tab)) ? (route.query.tab as Tab) : 'replace')
+const tabOf = (q: unknown): Tab => ((tabs as readonly string[]).includes(String(q)) ? (q as Tab) : 'replace')
+const tab = ref<Tab>(tabOf(route.query.tab))
+// 页面有缓存：离开后路由变成别的页面，只在规则页时跟随地址
+watch(
+  () => route.query.tab,
+  (q) => {
+    if (route.name === 'rules') tab.value = tabOf(q)
+  },
+)
 function setTab(t: Tab) {
   router.replace({ query: { ...route.query, tab: t === 'replace' ? undefined : t } })
 }
+// 从侧栏回到规则页（地址没有 ?tab=）时回到上次的标签
+onActivated(() => {
+  if (route.query.tab === undefined && tab.value !== 'replace') setTab(tab.value)
+})
 </script>
 
 <template>

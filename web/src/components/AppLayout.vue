@@ -157,7 +157,7 @@ function renderIcon(icon: Component) {
         </n-button>
       </div>
       <router-view v-slot="{ Component }">
-        <keep-alive :include="['ShelfView', 'SearchView', 'ExploreView', 'SourcesView']">
+        <keep-alive :include="['ShelfView', 'SearchView', 'ExploreView', 'SourcesView', 'RulesView', 'ZLibraryView']">
           <component :is="Component" />
         </keep-alive>
       </router-view>
