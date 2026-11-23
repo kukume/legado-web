@@ -2,7 +2,7 @@
 import { goBack } from '@/utils/navigation'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NButton, NConfigProvider, NIcon, NInput, NModal, NSpace, NSpin, darkTheme, useMessage, type GlobalThemeOverrides } from 'naive-ui'
+import { NButton, NConfigProvider, NIcon, NInput, NModal, NSpace, NSpin, darkTheme, useDialog, useMessage, type GlobalThemeOverrides } from 'naive-ui'
 import { isLight } from '@/utils/color'
 import { ChevronBackOutline, ChevronForwardOutline } from '@vicons/ionicons5'
 import { searchApi, shelfApi, toOpenRequest } from '@/api'
@@ -642,14 +642,26 @@ async function copyMark() {
   else message.error(t('当前浏览器不允许复制，请使用系统菜单中的“拷贝”'))
 }
 
-async function removeMark(h?: BookHighlight) {
+const dialog = useDialog()
+/** 删除标注前确认（标注可能写了笔记，删了找不回来） */
+function removeMark(h?: BookHighlight) {
   const id = h?.id ?? markBar.id
+  const mark = h ?? marks.find(id)
   markBar.show = false
-  try {
-    await marks.remove([id])
-  } catch (e: any) {
-    message.error(e.message)
-  }
+  const text = mark?.bookText ?? ''
+  dialog.warning({
+    title: t('删除标注'),
+    content: text ? `「${text.length > 40 ? text.slice(0, 40) + '…' : text}」` : undefined,
+    positiveText: t('删除'),
+    negativeText: t('取消'),
+    onPositiveClick: async () => {
+      try {
+        await marks.remove([id])
+      } catch (e: any) {
+        message.error(e.message)
+      }
+    },
+  })
 }
 
 /** 从目录的标注列表跳到标注处 */

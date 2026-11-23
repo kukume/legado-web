@@ -367,5 +367,8 @@
   "没有选中文字": "No text selected",
   "标注不存在": "Highlight not found",
   "highlight.json 解析失败：{0}": "Couldn't parse highlight.json: {0}",
-  "有 {0} 个标注对应的书不在书架上，已跳过": "Skipped {0} highlights whose books aren't on the bookshelf"
+  "有 {0} 个标注对应的书不在书架上，已跳过": "Skipped {0} highlights whose books aren't on the bookshelf",
+  "路径无效": "Invalid path",
+  "空间大小无效": "Invalid storage size",
+  "PDF 请下载后在“导入本地书籍”中上传": "Please download the PDF and upload it in “Import local books”"
 }

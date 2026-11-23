@@ -10,6 +10,10 @@ export interface User {
   invitedBy: number | null
   /** 单独授权添加书源 */
   canAddSource: boolean
+  /** 单独设置的本地书籍总空间（MB），为空时使用系统默认值 */
+  localBookQuotaMb?: number | null
+  /** 本地书籍已用空间（只在管理员的用户列表里有） */
+  localBookUsedBytes?: number | null
 }
 
 export interface Me {
@@ -188,6 +192,8 @@ export interface Book {
   reSegment?: boolean
   removeSameTitle?: boolean
   useReplaceRule?: boolean
+  /** 导入本地书籍时：更新了书架上已有的同一本书（而不是新增） */
+  updated?: boolean
 }
 
 export interface TtsEngine {

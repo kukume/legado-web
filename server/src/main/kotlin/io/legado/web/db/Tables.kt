@@ -15,6 +15,8 @@ object Users : LongIdTable("users") {
     val tokenVersion = integer("token_version").default(0)
     /** 单独授权：允许该用户添加书源（管理员始终允许） */
     val canAddSource = bool("can_add_source").default(false)
+    /** 单独设置的本地书籍总空间（MB），为空时使用系统设置里的默认值 */
+    val localBookQuotaMb = integer("local_book_quota_mb").nullable()
 }
 
 object InviteCodes : LongIdTable("invite_codes") {

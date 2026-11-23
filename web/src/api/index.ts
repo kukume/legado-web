@@ -46,7 +46,7 @@ export const adminApi = {
   users: () => http.get<User[]>('/api/admin/users'),
   createUser: (username: string, password: string) =>
     http.post<User>('/api/admin/users', { username, password }),
-  updateUser: (id: number, data: { enabled?: boolean; password?: string; canAddSource?: boolean }) =>
+  updateUser: (id: number, data: { enabled?: boolean; password?: string; canAddSource?: boolean; localBookQuotaMb?: number }) =>
     http.patch<User>(`/api/admin/users/${id}`, data),
   deleteUser: (id: number) => http.del(`/api/admin/users/${id}`),
   settings: () => http.get<Record<string, string>>('/api/admin/settings'),
@@ -564,6 +564,11 @@ export interface WebDavFile {
   isDir: boolean
 }
 
+/** WebDAV 选书时的文件：imported 为书架上已有同名文件导入的书（再导入会更新那本书） */
+export interface WebDavBookEntry extends WebDavFile {
+  imported: boolean
+}
+
 const partsQuery = (p: BackupParts) => new URLSearchParams(Object.entries(p).map(([k, v]) => [k, String(v)])).toString()
 
 export const webdavApi = {
@@ -574,6 +579,10 @@ export const webdavApi = {
   list: () => http.get<WebDavFile[]>("/api/webdav/backups"),
   restore: (name: string, p: BackupParts) =>
     http.post<BackupImportSummary>(`/api/webdav/restore?${partsQuery(p)}`, { name }),
+  /** 列出目录（path 相对 WebDAV 地址，空为根目录） */
+  books: (path: string) => http.get<WebDavBookEntry[]>(`/api/webdav/books?path=${encodeURIComponent(path)}`),
+  /** 下载并导入一个文件（zip 压缩包解压后逐本导入）；书架上已有同一本书时更新它 */
+  importBook: (path: string, groupId: number) => http.post<Book | LocalArchiveResult>('/api/webdav/books/import', { path, groupId }),
 }
 
 export const prefsApi = {

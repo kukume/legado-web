@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, h, onMounted, ref } from 'vue'
 import {
-  NAlert, NButton, NDataTable, NIcon, NInput, NInputGroup, NInputNumber, NModal, NRadioButton, NRadioGroup,
+  NAlert, NButton, NDataTable, NIcon, NInput, NInputGroup, NInputNumber, NModal, NRadio, NRadioButton, NRadioGroup,
   NSpace, NSwitch, NTabs, NTabPane, useDialog, useMessage, type DataTableColumns,
 } from 'naive-ui'
 import { BookOutline, CloudDownloadOutline, GlobeOutline, HomeOutline, LockClosedOutline, LogoGithub, PeopleOutline, ShieldCheckmarkOutline, SpeedometerOutline } from '@vicons/ionicons5'
@@ -98,7 +98,7 @@ async function copyUpgradeCmd() {
   message.success(t('已复制'))
 }
 
-async function update(u: User, data: { enabled?: boolean; password?: string; canAddSource?: boolean }) {
+async function update(u: User, data: { enabled?: boolean; password?: string; canAddSource?: boolean; localBookQuotaMb?: number }) {
   try {
     const nu = await adminApi.updateUser(u.id, data)
     Object.assign(u, nu)
@@ -138,7 +138,7 @@ const allUsersCanAddSource = computed(() => {
 const sourceColumn: DataTableColumns<User>[number] = {
   title: t('添加书源'),
   key: 'canAddSource',
-  width: 100,
+  minWidth: 88,
   align: 'center',
   // 管理员始终可以添加书源：显示为开启且不可修改
   render: (u) =>
@@ -151,24 +151,71 @@ const sourceColumn: DataTableColumns<User>[number] = {
     }),
 }
 
+// ---------------- 本地书籍空间：每个用户可以单独设置，没有设置时用系统设置里的默认值 ----------------
+
+/** 已保存的设置（未保存的修改不算） */
+const savedSetting = (key: string) => {
+  try {
+    return JSON.parse(savedSettings.value)[key] as string | undefined
+  } catch {
+    return undefined
+  }
+}
+const localBookEnabled = computed(() => savedSetting('localBookEnabled') !== 'false')
+const defaultQuota = computed(() => Number(savedSetting('localBookQuotaMb') || 100))
+const quotaOf = (u: User) => u.localBookQuotaMb || defaultQuota.value
+const fmtSize = (n: number) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)}MB` : n > 0 ? `${Math.max(1, Math.round(n / 1024))}KB` : '0')
+const quotaText = (u: User) => `${fmtSize(u.localBookUsedBytes ?? 0)} / ${quotaOf(u)}MB`
+
+const quotaTarget = ref<User | null>(null)
+const quotaCustom = ref(false)
+const quotaValue = ref<number | null>(null)
+
+function openQuota(u: User) {
+  quotaTarget.value = u
+  quotaCustom.value = !!u.localBookQuotaMb
+  quotaValue.value = u.localBookQuotaMb || defaultQuota.value
+}
+
+async function saveQuota() {
+  const u = quotaTarget.value
+  if (!u) return
+  if (quotaCustom.value && !quotaValue.value) return message.warning(t('请填写空间大小'))
+  await update(u, { localBookQuotaMb: quotaCustom.value ? quotaValue.value! : 0 })
+  quotaTarget.value = null
+}
+
+const quotaColumn: DataTableColumns<User>[number] = {
+  title: t('书籍空间'),
+  key: 'localBookQuotaMb',
+  minWidth: 140,
+  render: (u) =>
+    h(
+      NButton,
+      { text: true, size: 'small', type: u.localBookQuotaMb ? 'primary' : 'default', title: u.localBookQuotaMb ? t('单独设置') : t('系统默认'), onClick: () => openQuota(u) },
+      () => quotaText(u),
+    ),
+}
+
 const desktopColumns = computed<DataTableColumns<User>>(() => [
-  // 用户名、邀请人平分剩余宽度，其余列按内容定宽；操作列固定在右侧，手机上横向滚动时也能看到
+  // 除 ID、操作外各列都只设最小宽度，屏幕宽时平分多出来的宽度；开关居中，文字居左；操作列固定在右侧，手机上横向滚动时也能看到
   { title: 'ID', key: 'id', width: 56 },
-  { title: t('用户名'), key: 'username', minWidth: 140, ellipsis: { tooltip: true } },
+  { title: t('用户名'), key: 'username', minWidth: 120, ellipsis: { tooltip: true } },
   {
     title: t('启用'),
     key: 'enabled',
-    width: 72,
+    minWidth: 64,
     align: 'center',
     render: (u) => h(NSwitch, { size: 'small', value: u.enabled, disabled: u.id === auth.user?.id, onUpdateValue: (v: boolean) => update(u, { enabled: v }) }),
   },
   ...(allUsersCanAddSource.value ? [] : [sourceColumn]),
-  { title: t('邀请人'), key: 'invitedBy', minWidth: 120, ellipsis: { tooltip: true }, render: (u) => nameOf(u.invitedBy) },
-  { title: t('注册时间'), key: 'createdAt', width: 150, render: (u) => formatDate(u.createdAt) },
+  ...(localBookEnabled.value ? [quotaColumn] : []),
+  { title: t('邀请人'), key: 'invitedBy', minWidth: 100, ellipsis: { tooltip: true }, render: (u) => nameOf(u.invitedBy) },
+  { title: t('注册时间'), key: 'createdAt', minWidth: 140, render: (u) => formatDate(u.createdAt) },
   {
     title: t('操作'),
     key: 'op',
-    width: 150,
+    width: 140,
     fixed: 'right',
     render: (u) =>
       h(NSpace, { size: 4, wrap: false }, () => [
@@ -193,6 +240,7 @@ const mobileCols = computed(() =>
     onToggle: (u, v) => update(u, { enabled: v }),
     actions: (u) => [
       { key: 'reset', label: t('重置密码'), onSelect: () => { resetTarget.value = u; resetPwd.value = '' } },
+      ...(localBookEnabled.value ? [{ key: 'quota', label: t('书籍空间（{0}）', [quotaText(u)]), onSelect: () => openQuota(u) }] : []),
       ...(u.role === 'admin' || allUsersCanAddSource.value
         ? []
         : [{ key: 'source', label: u.canAddSource ? t('取消添加书源权限') : t('允许添加书源'), onSelect: () => update(u, { canAddSource: !u.canAddSource }) }]),
@@ -296,7 +344,7 @@ async function saveSettings() {
           :loading="loading"
           size="small"
           :class="{ 'm-table': isMobile }"
-          :scroll-x="isMobile ? undefined : allUsersCanAddSource ? 690 : 790"
+          :scroll-x="isMobile ? undefined : (allUsersCanAddSource ? 620 : 708) + (localBookEnabled ? 140 : 0)"
           :table-layout="isMobile ? 'fixed' : 'auto'"
         />
       </n-tab-pane>
@@ -505,7 +553,10 @@ async function saveSettings() {
                   </div>
                 </div>
                 <div class="set-row sub">
-                  <div class="set-text"><div class="set-label">{{ t('每个用户总空间（MB）') }}</div></div>
+                  <div class="set-text">
+                    <div class="set-label">{{ t('每个用户总空间（MB）') }}</div>
+                    <div class="set-desc">{{ t('默认值，可以在用户列表的“书籍空间”里给某个用户单独设置') }}</div>
+                  </div>
                   <div class="set-control">
                     <n-input-number :value="Number(settings.localBookQuotaMb || 100)" :min="1" size="small" class="num" @update:value="(v: number | null) => (settings.localBookQuotaMb = String(v ?? 100))" />
                   </div>
@@ -603,6 +654,22 @@ async function saveSettings() {
       <n-input v-model:value="resetPwd" type="password" :placeholder="t('新密码（至少 6 位）')" />
     </n-modal>
 
+    <n-modal :show="!!quotaTarget" preset="dialog" :title="t('{0} 的书籍空间', [quotaTarget?.username])" :positive-text="t('保存')"
+      :negative-text="t('取消')" @positive-click="saveQuota" @update:show="(v: boolean) => !v && (quotaTarget = null)">
+      <n-radio-group v-model:value="quotaCustom" class="quota-radio">
+        <n-space vertical>
+          <n-radio :value="false">{{ t('使用系统默认值（{0}MB）', [defaultQuota]) }}</n-radio>
+          <n-radio :value="true">{{ t('单独设置') }}</n-radio>
+        </n-space>
+      </n-radio-group>
+      <n-input-number v-if="quotaCustom" v-model:value="quotaValue" :min="1" :max="1048576" :precision="0" size="small" class="quota-input">
+        <template #suffix>MB</template>
+      </n-input-number>
+      <div class="muted small quota-note">
+        {{ t('已用 {0}。空间设得比已用的小时，不能再导入新书，已有的书不受影响。', [fmtSize(quotaTarget?.localBookUsedBytes ?? 0)]) }}
+      </div>
+    </n-modal>
+
     <n-modal v-model:show="showCreate" preset="card" :title="t('添加用户')" style="max-width: 400px">
       <n-space vertical>
         <n-input v-model:value="createForm.username" :placeholder="t('用户名')" />
@@ -615,6 +682,20 @@ async function saveSettings() {
 </template>
 
 <style scoped>
+.quota-radio {
+  margin: 8px 0;
+}
+
+.quota-input {
+  width: 180px;
+  margin-left: 24px;
+}
+
+.quota-note {
+  margin-top: 12px;
+  font-size: 12.5px;
+}
+
 .update-alert {
   margin-bottom: 12px;
 }

@@ -149,6 +149,33 @@ class WebDavClient(
         }
     }
 
+    /** 下载到文件（边读边计数，超过 [maxSize] 时报错并删除不完整的文件） */
+    suspend fun downloadTo(url: String, dest: java.io.File, maxSize: Long) {
+        val req = request(url).get().build()
+        try {
+            exec(req) { res ->
+                if (!res.isSuccessful) res.fail("下载")
+                if (res.body.contentLength() > maxSize) throw BadRequestException("文件过大（最大 ${maxSize / 1024 / 1024}MB）")
+                res.body.byteStream().use { input ->
+                    dest.outputStream().use { out ->
+                        val buf = ByteArray(64 * 1024)
+                        var total = 0L
+                        while (true) {
+                            val n = input.read(buf)
+                            if (n < 0) break
+                            total += n
+                            if (total > maxSize) throw BadRequestException("文件过大（最大 ${maxSize / 1024 / 1024}MB）")
+                            out.write(buf, 0, n)
+                        }
+                    }
+                }
+            }
+        } catch (e: Throwable) {
+            dest.delete()
+            throw e
+        }
+    }
+
     private fun Element.localName() = tagName().substringAfter(':').lowercase()
 
     private fun Element.child(name: String): Element? = getAllElements().firstOrNull { it.localName() == name }

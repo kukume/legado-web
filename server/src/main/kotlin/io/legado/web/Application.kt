@@ -46,6 +46,7 @@ import io.legado.web.routes.authRoutes
 import io.legado.web.routes.shelfRoutes
 import io.legado.web.routes.openApiRoutes
 import io.legado.web.routes.backupRoutes
+import io.legado.web.routes.webDavBookRoutes
 import io.legado.web.service.BackupService
 import io.legado.web.service.BookmarkService
 import io.legado.web.service.ReadingStatsService
@@ -137,6 +138,7 @@ fun Application.module() {
     val localBookService = io.legado.web.service.LocalBookService(appSettings, settingService).also {
         it.shelfService = shelfService
         it.tocRules = txtTocRuleService
+        it.userService = userService
         shelfService.localBooks = it
     }
     val backupService = BackupService(sourceService, shelfService, replaceService, dictRuleService, txtTocRuleService, io.legado.web.service.HighlightRuleService())
@@ -268,12 +270,13 @@ fun Application.module() {
     configureSecurity(jwtService, userService)
 
     routing {
-        authRoutes(userService, jwtService, settingService, captchaService, updateService)
+        authRoutes(userService, jwtService, settingService, captchaService, updateService, localBookService)
         longCallRoutes()
         sourceRoutes(sourceService, configService, searchService, subscriptionService, io.legado.web.service.SourceCheckService(sourceService, settingService))
         shelfRoutes(shelfService, searchService, replaceService, proxyService, configService, reviewService, localBookService)
         openApiRoutes(apiKeyService, shelfService, readingStatsService)
         backupRoutes(backupService, webDavService)
+        webDavBookRoutes(webDavService, localBookService, shelfService)
         mediaRoutes(audioService, ttsService, io.legado.web.service.FontService(appSettings.dataDir))
         bookmarkRoutes(bookmarkService, bookHighlightService)
         readingStatsRoutes(readingStatsService)

@@ -49,6 +49,8 @@ data class AdminUserUpdate(
     val enabled: Boolean? = null,
     val password: String? = null,
     val canAddSource: Boolean? = null,
+    /** 本地书籍总空间（MB），0 表示使用系统默认值 */
+    val localBookQuotaMb: Int? = null,
 )
 data class AdminCreateUser(val username: String = "", val password: String = "")
 
@@ -63,6 +65,7 @@ fun Route.authRoutes(
     settings: SettingService,
     captcha: CaptchaService,
     updates: io.legado.web.service.UpdateService,
+    localBooks: io.legado.web.service.LocalBookService,
 ) {
     val loginGuard = LoginGuard(settings)
     route("/api/auth") {
@@ -148,7 +151,11 @@ fun Route.authRoutes(
         route("/api/admin") {
             get("/users") {
                 call.requireAdmin()
-                call.respond(userService.list())
+                val users = userService.list()
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    users.forEach { it.localBookUsedBytes = localBooks.usedBytes(it.id) }
+                }
+                call.respond(users)
             }
             post("/users") {
                 call.requireAdmin()
@@ -158,7 +165,10 @@ fun Route.authRoutes(
             patch("/users/{id}") {
                 val admin = call.requireAdmin()
                 val req = call.receive<AdminUserUpdate>()
-                call.respond(userService.adminUpdate(admin.id, call.longParam("id"), req.enabled, req.password, req.canAddSource))
+                val id = call.longParam("id")
+                val u = userService.adminUpdate(admin.id, id, req.enabled, req.password, req.canAddSource, req.localBookQuotaMb)
+                u.localBookUsedBytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { localBooks.usedBytes(id) }
+                call.respond(u)
             }
             delete("/users/{id}") {
                 val admin = call.requireAdmin()

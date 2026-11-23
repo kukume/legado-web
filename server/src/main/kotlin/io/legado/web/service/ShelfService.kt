@@ -85,6 +85,8 @@ data class BookDto(
     val reSegment: Boolean = false,
     val removeSameTitle: Boolean = true,
     val useReplaceRule: Boolean = true,
+    /** 导入本地书籍时：更新了书架上已有的同一本书（而不是新增） */
+    var updated: Boolean = false,
 )
 
 data class ChapterDto(
@@ -404,6 +406,66 @@ class ShelfService(
             id
         }
         return getBook(user, id)
+    }
+
+    /**
+     * 书架上与要导入的文件对应的本地书：原文件名相同的优先，其次书名和作者都相同（[name] 为 null 时只按文件名找）。
+     * 返回 (书籍 id, bookUrl)，有多本时取最近添加的
+     */
+    suspend fun findLocalBook(userId: Long, originName: String, name: String?, author: String?): Pair<Long, String>? = dbQuery {
+        fun find(cond: Op<Boolean>) = Books.select(Books.id, Books.bookUrl)
+            .where { (Books.userId eq userId) and (Books.origin eq BookType.localTag) and cond }
+            .orderBy(Books.id, SortOrder.DESC).limit(1).firstOrNull()
+            ?.let { it[Books.id].value to it[Books.bookUrl] }
+        find(Books.originName eq originName)
+            ?: if (name.isNullOrBlank()) null else find((Books.name eq name.take(255)) and (Books.author eq (author ?: "").take(255)))
+    }
+
+    /** 已导入的本地书的原文件名（WebDAV 选书时标出已导入的文件） */
+    suspend fun localOriginNames(userId: Long): Set<String> = dbQuery {
+        Books.select(Books.originName).where { (Books.userId eq userId) and (Books.origin eq BookType.localTag) }
+            .map { it[Books.originName] }.toSet()
+    }
+
+    /**
+     * 重新导入已有的本地书：换成新文件（[book] 的 bookUrl）并替换目录。保留书名、作者（可能被用户改过）、分组、
+     * 阅读进度（章节超出新目录时退到最后一章）、书签和标注；返回的书籍 [BookDto.updated] 为 true。
+     * 旧文件由调用方删除
+     */
+    suspend fun replaceLocalBook(user: UserPrincipal, bookId: Long, book: Book, chapters: List<BookChapter>, coverPath: String?): BookDto {
+        val now = System.currentTimeMillis()
+        lock(bookId).withLock {
+            dbQuery {
+                val row = Books.selectAll().where { (Books.id eq bookId) and (Books.userId eq user.id) }.firstOrNull()
+                    ?: throw NotFoundException("书籍不存在")
+                val last = (chapters.size - 1).coerceAtLeast(0)
+                val dur = row[Books.durChapterIndex]
+                val newDur = dur.coerceAtMost(last)
+                Books.update({ Books.id eq bookId }) {
+                    it[bookUrl] = book.bookUrl
+                    it[tocUrl] = book.tocUrl
+                    it[originName] = book.originName
+                    it[type] = book.type
+                    if (book.intro != null) it[intro] = book.intro
+                    if (book.kind != null) it[kind] = book.kind
+                    // 封面地址带上时间：浏览器缓存了旧封面
+                    it[coverUrl] = if (coverPath != null) localBooks.coverUrl(bookId) + "?v=$now" else null
+                    it[wordCount] = book.wordCount?.take(64)
+                    it[totalChapterNum] = chapters.size
+                    it[latestChapterTitle] = chapters.lastOrNull()?.title?.trim()
+                    it[latestChapterTime] = now
+                    it[lastCheckTime] = now
+                    it[lastCheckCount] = 0
+                    if (newDur != dur) {
+                        it[durChapterIndex] = newDur
+                        it[durChapterPos] = 0
+                    }
+                    it[durChapterTitle] = chapters.getOrNull(newDur)?.title?.trim() ?: row[durChapterTitle]
+                }
+                saveChapters(bookId, chapters)
+            }
+        }
+        return getBook(user, bookId).also { it.updated = true }
     }
 
     /** progress：是否写入阅读进度（更新目录时不写：更新期间用户可能已经读到别的章节） */

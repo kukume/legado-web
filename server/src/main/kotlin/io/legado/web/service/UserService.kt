@@ -33,9 +33,14 @@ data class UserDto(
     val invitedBy: Long?,
     /** 是否单独授权添加书源 */
     val canAddSource: Boolean = false,
+    /** 单独设置的本地书籍总空间（MB），为空时使用系统默认值 */
+    val localBookQuotaMb: Int? = null,
 ) {
     @Transient
     var tokenVersion: Int = 0
+
+    /** 本地书籍已用空间（只在管理员的用户列表里返回） */
+    var localBookUsedBytes: Long? = null
 }
 
 data class InviteDto(
@@ -69,6 +74,7 @@ class UserService(private val settings: SettingService) {
         lastLoginAt = this[Users.lastLoginAt],
         invitedBy = this[Users.invitedBy],
         canAddSource = this[Users.canAddSource],
+        localBookQuotaMb = this[Users.localBookQuotaMb],
     ).also { it.tokenVersion = this[Users.tokenVersion] }
 
     fun findActive(id: Long): UserDto? {
@@ -220,10 +226,13 @@ class UserService(private val settings: SettingService) {
         enabled: Boolean?,
         password: String?,
         canAddSource: Boolean? = null,
+        /** 本地书籍总空间（MB）：null 不修改，0 恢复为系统默认值 */
+        localBookQuotaMb: Int? = null,
     ): UserDto {
         // 角色不能修改：管理员只有第一个注册的用户
         if (id == operatorId && enabled == false) throw BadRequestException("不能禁用自己")
         if (password != null && password.length < 6) throw BadRequestException("密码至少 6 位")
+        if (localBookQuotaMb != null && localBookQuotaMb !in 0..1024 * 1024) throw BadRequestException("空间大小无效")
         // 状态、密码变化需要让旧登录失效；单纯修改书源权限不影响登录
         val invalidateTokens = enabled != null || password != null
         dbQuery {
@@ -231,6 +240,7 @@ class UserService(private val settings: SettingService) {
                 enabled?.let { e -> it[Users.enabled] = e }
                 password?.let { p -> it[passwordHash] = Passwords.hash(p) }
                 canAddSource?.let { c -> it[Users.canAddSource] = c }
+                localBookQuotaMb?.let { q -> it[Users.localBookQuotaMb] = if (q > 0) q else null }
                 if (invalidateTokens) it[tokenVersion] = tokenVersion + 1
             }
         }

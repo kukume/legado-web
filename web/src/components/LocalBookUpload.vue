@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { NButton, NIcon, NModal, NProgress, NSelect, useMessage } from 'naive-ui'
-import { CloudUploadOutline, CheckmarkCircle, CloseCircle } from '@vicons/ionicons5'
-import { shelfApi } from '@/api'
+import { CloudUploadOutline, CheckmarkCircle, CloseCircle, CloudDownloadOutline } from '@vicons/ionicons5'
+import { shelfApi, webdavApi } from '@/api'
+import WebDavBookPicker, { type PickedFile } from '@/components/WebDavBookPicker.vue'
 import type { Book, BookGroup, LocalBookInfo } from '@/api/types'
 import { t } from '@/i18n'
 import { inspectPdf, isPdfFile } from '@/utils/pdf'
@@ -14,7 +15,10 @@ const emit = defineEmits<{ 'update:show': [boolean]; uploaded: [Book]; refreshIn
 const message = useMessage()
 
 interface Item {
-  file: File
+  /** 上传的文件（从 WebDAV 导入时为空） */
+  file?: File
+  /** 从 WebDAV 导入的文件 */
+  remote?: PickedFile
   status: 'wait' | 'uploading' | 'done' | 'error'
   /** PDF 上传前在浏览器里读取页数、渲染封面 */
   reading?: boolean
@@ -30,6 +34,17 @@ const items = ref<Item[]>([])
 const groupId = ref(0)
 const dragging = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
+const showDav = ref(false)
+const itemName = (i: Item) => i.file?.name ?? i.remote?.name ?? ''
+const itemSize = (i: Item) => i.file?.size ?? i.remote?.size ?? 0
+const updatedCount = (books: Book[]) => books.filter((b) => b.updated).length
+
+/** 从 WebDAV 选择的文件：加入队列，由服务器下载后导入 */
+function addRemote(files: PickedFile[]) {
+  for (const f of files) items.value.push({ remote: f, status: 'wait', progress: 0 })
+  run()
+}
+
 const busy = computed(() => items.value.some((i) => i.status === 'uploading' || i.status === 'wait'))
 
 watch(
@@ -70,17 +85,36 @@ async function run() {
       const item = items.value.find((i) => i.status === 'wait')
       if (!item) break
       item.status = 'uploading'
+      if (item.remote) {
+        try {
+          const res = await webdavApi.importBook(item.remote.path, groupId.value)
+          if ('archive' in res && res.archive) {
+            item.books = res.books
+            item.skipped = res.skipped
+            res.books.forEach((b) => emit('uploaded', b))
+          } else {
+            item.book = res as Book
+            emit('uploaded', item.book)
+          }
+          item.status = 'done'
+        } catch (e: any) {
+          item.status = 'error'
+          item.error = e.message
+        }
+        continue
+      }
+      const file = item.file!
       try {
         let pdf: { pages: number; cover: Blob | null } | null = null
-        if (isPdfFile(item.file)) {
+        if (isPdfFile(file)) {
           item.reading = true
           try {
-            pdf = await inspectPdf(item.file)
+            pdf = await inspectPdf(file)
           } finally {
             item.reading = false
           }
         }
-        const res = await shelfApi.uploadLocal(item.file, groupId.value, (p) => (item.progress = p), pdf?.pages)
+        const res = await shelfApi.uploadLocal(file, groupId.value, (p) => (item.progress = p), pdf?.pages)
         if ('archive' in res && res.archive) {
           // zip 压缩包：解压后导入了多本
           item.books = res.books
@@ -136,6 +170,10 @@ defineExpose({ addFiles })
       <div class="muted small">{{ t('支持 EPUB、TXT、MOBI、AZW3、AZW、UMD、PDF 和 zip 压缩包，单个文件最大 {0}MB', [info?.maxMb ?? 50]) }}</div>
       <input ref="fileInput" type="file" :accept="accept" multiple hidden @change="onPick" />
     </div>
+    <n-button size="small" secondary block class="dav-btn" @click="showDav = true">
+      <template #icon><n-icon :component="CloudDownloadOutline" /></template>
+      {{ t('从 WebDAV 选择') }}
+    </n-button>
     <div class="row">
       <span class="muted small">{{ t('放入分组') }}</span>
       <n-select v-model:value="groupId" :options="groupOptions" size="small" style="flex: 1" />
@@ -147,24 +185,29 @@ defineExpose({ addFiles })
     <div v-if="items.length" class="items">
       <div v-for="(it, i) in items" :key="i" class="item">
         <div class="item-head">
-          <span class="ellipsis name">{{ it.file.name }}</span>
-          <span class="muted small">{{ fmtSize(it.file.size) }}</span>
+          <span class="ellipsis name">{{ itemName(it) }}</span>
+          <span class="muted small">{{ fmtSize(itemSize(it)) }}</span>
           <n-icon v-if="it.status === 'done'" :component="CheckmarkCircle" color="#18a058" />
           <n-icon v-else-if="it.status === 'error'" :component="CloseCircle" color="#d03050" />
         </div>
         <n-progress
-          v-if="it.status === 'uploading' || it.status === 'wait'"
+          v-if="(it.status === 'uploading' || it.status === 'wait') && !it.remote"
           type="line"
           :percentage="Math.round(it.progress * 100)"
           :height="4"
           :show-indicator="false"
           :processing="it.progress >= 1"
         />
-        <div v-if="it.reading" class="muted small">{{ t('正在读取 PDF…') }}</div>
+        <div v-if="it.remote && it.status === 'wait'" class="muted small">{{ t('等待导入…') }}</div>
+        <div v-else-if="it.remote && it.status === 'uploading'" class="muted small">{{ t('正在从 WebDAV 下载并导入…') }}</div>
+        <div v-else-if="it.reading" class="muted small">{{ t('正在读取 PDF…') }}</div>
         <div v-else-if="it.status === 'uploading' && it.progress >= 1" class="muted small">{{ t('正在解析目录…') }}</div>
-        <div v-if="it.status === 'done' && it.book" class="muted small">{{ t('《{0}》共 {1} 章', [it.book.name, it.book.totalChapterNum]) }}</div>
+        <div v-if="it.status === 'done' && it.book" class="muted small">
+          {{ it.book.updated ? t('已更新《{0}》，共 {1} 章（保留阅读进度）', [it.book.name, it.book.totalChapterNum]) : t('《{0}》共 {1} 章', [it.book.name, it.book.totalChapterNum]) }}
+        </div>
         <template v-if="it.status === 'done' && it.books">
           <div class="muted small">{{ t('解压导入 {0} 本：{1}', [it.books.length, it.books.map((b) => `《${b.name}》`).join('')]) }}</div>
+          <div v-if="updatedCount(it.books)" class="muted small">{{ t('其中 {0} 本是书架上已有的书，已更新（保留阅读进度）', [updatedCount(it.books)]) }}</div>
           <div v-for="s in it.skipped" :key="s.name" class="muted small skip">{{ t('跳过 {0}：{1}', [s.name, s.reason]) }}</div>
         </template>
         <div v-if="it.status === 'error'" class="small err">{{ it.error }}</div>
@@ -177,6 +220,7 @@ defineExpose({ addFiles })
       </div>
     </template>
   </n-modal>
+  <web-dav-book-picker v-model:show="showDav" @pick="addRemote" />
 </template>
 
 <style scoped>
@@ -198,6 +242,10 @@ defineExpose({ addFiles })
 .drop.dragging {
   border-color: #18a058;
   background: rgba(24, 160, 88, 0.06);
+}
+
+.dav-btn {
+  margin-top: 10px;
 }
 
 .row {

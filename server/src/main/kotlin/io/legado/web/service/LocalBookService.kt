@@ -39,6 +39,7 @@ class LocalBookService(
     /** 由 Application 设置（ShelfService 也依赖本服务读取正文） */
     lateinit var shelfService: ShelfService
     lateinit var tocRules: TxtTocRuleService
+    lateinit var userService: UserService
 
     data class LocalBookInfo(val enabled: Boolean, val maxMb: Int, val quotaMb: Int, val usedBytes: Long)
 
@@ -78,12 +79,16 @@ class LocalBookService(
 
     private fun enabled() = settings.get(SettingService.LOCAL_BOOK_ENABLED) != "false"
     private fun maxBytes() = settings.getInt(SettingService.LOCAL_BOOK_MAX_MB).coerceIn(1, 1024) * 1024L * 1024
-    private fun quotaBytes() = settings.getInt(SettingService.LOCAL_BOOK_QUOTA_MB).coerceIn(1, 1024 * 1024) * 1024L * 1024
+    /** 用户的总空间（MB）：管理员单独设置的，没有设置时用系统设置里的默认值 */
+    fun quotaMb(userId: Long): Int =
+        (userService.findActive(userId)?.localBookQuotaMb ?: settings.getInt(SettingService.LOCAL_BOOK_QUOTA_MB)).coerceIn(1, 1024 * 1024)
+
+    private fun quotaBytes(userId: Long) = quotaMb(userId) * 1024L * 1024
 
     fun usedBytes(userId: Long): Long = userDir(userId).listFiles()?.sumOf { it.length() } ?: 0L
 
     fun info(user: UserPrincipal) = LocalBookInfo(
-        enabled(), settings.getInt(SettingService.LOCAL_BOOK_MAX_MB), settings.getInt(SettingService.LOCAL_BOOK_QUOTA_MB), usedBytes(user.id),
+        enabled(), settings.getInt(SettingService.LOCAL_BOOK_MAX_MB), quotaMb(user.id), usedBytes(user.id),
     )
 
     /** 上传前的检查（请求体大小限制由路由按 [uploadLimit] 执行） */
@@ -102,6 +107,11 @@ class LocalBookService(
         val pdfPages: Int? = null,
         /** 跳过“本地书籍上传”总开关检查（Z-Library 下载等内部导入用），配额仍然生效 */
         val force: Boolean = false,
+        /**
+         * 书架上已有同一本本地书时更新它（换成新文件、重新解析目录，保留阅读进度、书签、标注和分组），不再新增一本。
+         * 同一本书：原文件名相同，或书名和作者都相同（见 [ShelfService.findLocalBook]）
+         */
+        val updateExisting: Boolean = false,
     )
 
     /** zip 压缩包导入的结果（与单本书的返回区分：archive 为 true） */
@@ -136,7 +146,7 @@ class LocalBookService(
                     archive, workDir,
                     maxFileBytes = maxBytes(),
                     // 解压总量不超过剩余空间（再多也存不下），最多 1GB
-                    maxTotalBytes = minOf(1024L * 1024 * 1024, (quotaBytes() - usedBytes(user.id)).coerceAtLeast(0)),
+                    maxTotalBytes = minOf(1024L * 1024 * 1024, (quotaBytes(user.id) - usedBytes(user.id)).coerceAtLeast(0)),
                 )
                 val skipped = try {
                     extractor.forEachBook(
@@ -168,11 +178,14 @@ class LocalBookService(
             val size = upload.length()
             if (size == 0L) throw BadRequestException("文件是空的")
             if (size > maxBytes()) throw BadRequestException("文件过大（最大 ${settings.getInt(SettingService.LOCAL_BOOK_MAX_MB)}MB）")
-            val used = usedBytes(user.id)
-            if (used + size > quotaBytes()) {
-                throw BadRequestException("本地书籍空间不足（已用 ${used / 1024 / 1024}MB / ${settings.getInt(SettingService.LOCAL_BOOK_QUOTA_MB)}MB）")
-            }
             val displayName = originalName.substringAfterLast('/').substringAfterLast('\\').take(200).ifBlank { "未命名" }
+            // 更新同名文件的书时旧文件会被替换，不计入已用空间
+            val sameFile = if (options.updateExisting) shelfService.findLocalBook(user.id, displayName, null, null) else null
+            val replacedBytes = sameFile?.let { (_, url) -> runCatching { fileOf(user.id, url).let { f -> f.length() + coverFile(f).length() } }.getOrDefault(0L) } ?: 0L
+            val used = usedBytes(user.id) - replacedBytes
+            if (used + size > quotaBytes(user.id)) {
+                throw BadRequestException("本地书籍空间不足（已用 ${usedBytes(user.id) / 1024 / 1024}MB / ${quotaMb(user.id)}MB）")
+            }
             val ext = displayName.substringAfterLast('.', "").lowercase()
             // 以文件内容为准判断格式；扩展名只用来在内容不明确时区分
             val kind = when {
@@ -202,7 +215,17 @@ class LocalBookService(
                 } catch (e: LocalBookException) {
                     throw BadRequestException(e.message ?: "文件格式错误")
                 }
-                shelfService.addLocalBook(user, parsed.first, parsed.second, options.groupId, parsed.third)
+                val existing = if (options.updateExisting) {
+                    shelfService.findLocalBook(user.id, displayName, parsed.first.name, parsed.first.author)
+                } else null
+                if (existing != null) {
+                    val (id, oldUrl) = existing
+                    shelfService.replaceLocalBook(user, id, parsed.first, parsed.second, parsed.third).also {
+                        if (oldUrl != parsed.first.bookUrl) deleteFile(user.id, oldUrl)
+                    }
+                } else {
+                    shelfService.addLocalBook(user, parsed.first, parsed.second, options.groupId, parsed.third)
+                }
             } catch (e: Throwable) {
                 deleteFile(dest)
                 throw e
@@ -362,7 +385,7 @@ class LocalBookService(
                             EpubParser.Chapter("", href, anchors.substringBefore('|').ifEmpty { null }, anchors.substringAfter('|', "").ifEmpty { null }, 0)
                         }
                         val html = EpubParser(file).use { epub ->
-                            epub.chapterHtml(chapters, index) { path -> imageUrl(bookId, path) }
+                            epub.chapterHtml(chapters, index) { path -> imageUrl(bookId, path, file) }
                         }
                         nonBlankLines(HtmlFormatter.formatKeepImg(html))
                     }
@@ -371,7 +394,7 @@ class LocalBookService(
                         // 书内图片引用（recindex:N、kindle:embed:…）换成图片接口
                         val withImages = imgSrcRegex.replace(html) { m ->
                             val src = m.groupValues[1]
-                            if (src.startsWith("/") || src.startsWith("http")) m.value else m.value.replace(src, imageUrl(bookId, src))
+                            if (src.startsWith("/") || src.startsWith("http")) m.value else m.value.replace(src, imageUrl(bookId, src, file))
                         }
                         nonBlankLines(withImages)
                     }
@@ -392,7 +415,9 @@ class LocalBookService(
     /** 去掉空行（与章节名重复的首行由正文处理统一删除，见 ReplaceRuleService.apply） */
     private fun nonBlankLines(text: String): String = text.split('\n').filter { it.isNotBlank() }.joinToString("\n")
 
-    fun imageUrl(bookId: Long, path: String) = "/api/shelf/$bookId/local/image?p=${URLEncoder.encode(path, "UTF-8")}"
+    /** 书内图片地址。带上文件名的一部分（f）：重新导入后文件名会变，浏览器不会继续用缓存的旧图片 */
+    fun imageUrl(bookId: Long, path: String, file: File) =
+        "/api/shelf/$bookId/local/image?p=${URLEncoder.encode(path, "UTF-8")}&f=${file.name.take(8)}"
 
     fun coverUrl(bookId: Long) = "/api/shelf/$bookId/local/cover"
 

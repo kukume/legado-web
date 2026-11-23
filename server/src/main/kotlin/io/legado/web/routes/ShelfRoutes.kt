@@ -173,7 +173,7 @@ fun Route.shelfRoutes(
                     }
                     val pages = call.request.queryParameters["pages"]?.toIntOrNull()
                     // zip 压缩包（按文件头判断）解压后逐本导入，返回 { archive: true, books, skipped }
-                    val result = localBookService.importUpload(u, tmp, name, io.legado.web.service.LocalBookService.ImportOptions(groupId, pdfPages = pages))
+                    val result = localBookService.importUpload(u, tmp, name, io.legado.web.service.LocalBookService.ImportOptions(groupId, pdfPages = pages, updateExisting = true))
                     // 压缩包里跳过的文件：原因按界面语言翻译
                     call.respond(
                         if (result is io.legado.web.service.LocalBookService.ArchiveImportResult) {

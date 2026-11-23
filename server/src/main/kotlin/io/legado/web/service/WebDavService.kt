@@ -192,6 +192,42 @@ class WebDavService(
         return backupService.import(user, bytes, parts)
     }
 
+    // ---------------- 书籍（从 WebDAV 选择书籍导入） ----------------
+
+    /** WebDAV 根地址（不含备份目录：书可能放在网盘的任何地方） */
+    private fun baseUrl(c: StoredConfig): String {
+        var url = c.url.trim().ifEmpty { DEFAULT_URL }
+        if (!url.endsWith("/")) url += "/"
+        return url
+    }
+
+    /** 相对根地址的路径 -> 完整地址：逐段编码，不允许 . 和 ..（不能跳出 WebDAV 地址） */
+    private fun pathUrl(c: StoredConfig, path: String, dir: Boolean): String {
+        val parts = path.replace('\\', '/').split('/').filter { it.isNotEmpty() }
+        if (parts.any { it == "." || it == ".." }) throw BadRequestException("路径无效")
+        val encoded = parts.joinToString("/") { java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
+        return baseUrl(c) + encoded + if (dir && encoded.isNotEmpty()) "/" else ""
+    }
+
+    private suspend fun bookClient(user: UserPrincipal): Pair<WebDavClient, StoredConfig> {
+        val c = requireConfig(user)
+        WebDavClient.checkUrl(c.url, allowPrivate = user.isAdmin)
+        return WebDavClient(c.account, decrypt(c.password), allowPrivate = user.isAdmin) to c
+    }
+
+    /** 列出目录（[path] 相对 WebDAV 地址，空为根目录）：目录在前，按名称排序 */
+    suspend fun browse(user: UserPrincipal, path: String): List<WebDavFile> {
+        val (client, c) = bookClient(user)
+        return client.list(pathUrl(c, path, dir = true))
+            .sortedWith(compareByDescending<WebDavFile> { it.isDir }.thenBy(String.CASE_INSENSITIVE_ORDER) { it.name })
+    }
+
+    /** 下载一个文件到 [dest]（[path] 相对 WebDAV 地址） */
+    suspend fun download(user: UserPrincipal, path: String, dest: java.io.File, maxSize: Long) {
+        val (client, c) = bookClient(user)
+        client.downloadTo(pathUrl(c, path, dir = false), dest, maxSize)
+    }
+
     /** 定时任务：开启自动备份的用户每天备份一次 */
     suspend fun autoBackupAll() {
         val rows = dbQuery {
