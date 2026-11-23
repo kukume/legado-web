@@ -27,13 +27,17 @@
       .boot {
         --c: #9c6b30; --page: #fff8ec; --t: #7a6d5a; --track: rgba(156, 107, 48, 0.14);
         position: fixed; inset: 0; z-index: 9999; background: #f6f1e7;
-        display: flex; align-items: center; justify-content: center;
         font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
         transition: opacity 0.2s ease;
       }
       /* 外层负责淡出（盖着的页面渐渐显现），内层负责延迟淡入（加载快时不出现） */
       .boot.boot-out { opacity: 0; pointer-events: none; }
+      /*
+       * 图标中心固定在 --boot-cy（默认可视区域中心），进度条和文字排在图标下面。
+       * iOS 从主屏幕打开时由下面的脚本换成屏幕中心，与系统启动图（public/splash/）里图标的位置一致
+       */
       .boot-in {
+        position: absolute; left: 0; right: 0; top: var(--boot-cy, 50%); margin-top: -38px;
         display: flex; flex-direction: column; align-items: center; gap: 22px;
         animation: boot-in 0.4s ease-out 0.15s both;
       }
@@ -98,6 +102,12 @@
         boot.setAttribute('aria-label', text)
         // iOS 从主屏幕打开：系统启动图（public/splash/）画的就是这个图标，立即显示、不淡入，直接接上启动图
         if (navigator.standalone) {
+          // 启动图画的图标在整个屏幕的中心；页面从状态栏下面开始，图标要往上移半个状态栏才在同一位置。
+          // 状态栏高度各机型不同，用屏幕高度减可视区域高度得到（iOS 的 screen 尺寸不随横竖屏交换）
+          var sw = screen.width, sh = screen.height, vh = window.innerHeight
+          var screenH = window.innerWidth > vh ? Math.min(sw, sh) : Math.max(sw, sh)
+          var bar = screenH - vh
+          if (bar > 0 && bar < 100) boot.style.setProperty('--boot-cy', 'calc(50% - ' + bar / 2 + 'px)')
           boot.classList.add('boot-now')
           window.__bootShownAt = performance.now()
         }

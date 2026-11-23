@@ -8,7 +8,7 @@
  *   改了启动画面图标的样式、颜色或位置后重新生成
  * - 页面里的 <link> 由 vite.config.ts 构建时按下面的尺寸表注入
  */
-import { mkdirSync, rmSync } from 'node:fs'
+import { mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -74,8 +74,8 @@ export function splashEntries() {
 
 /**
  * 画一张启动图（SVG，单位为物理像素）。
- * 启动画面在网页可视区域里垂直居中，图标在整组内容（图标 76、间距 22、进度条 3、间距 22、文字约 17）的最上面，
- * 所以图标中心比可视区域中心高 32pt。网页从状态栏下面开始（状态栏样式为 default），可视区域中心比屏幕中心低半个状态栏
+ * 图标画在屏幕正中心；index.html 的启动画面在 iOS 主屏幕应用里按实际状态栏高度把图标也放到屏幕中心，
+ * 进度条和“加载中”排在图标下面，所以从启动图切到启动画面时图标不会移动
  */
 function splashSvg(entry) {
   const { size, landscape, dark } = entry
@@ -83,9 +83,8 @@ function splashSvg(entry) {
   const s = size.scale
   const W = landscape ? size.height : size.width
   const H = landscape ? size.width : size.height
-  const statusBar = size.ipad ? 24 : size.height / s >= 812 ? 47 : 20
   const cx = W / 2
-  const cy = H / 2 + (statusBar / 2) * s - 32 * s
+  const cy = H / 2
   const box = 76 * s
   const x = cx - box / 2
   const y = cy - box / 2
@@ -106,8 +105,11 @@ function splashSvg(entry) {
 async function main() {
   const { default: sharp } = await import('sharp')
   const root = join(dirname(fileURLToPath(import.meta.url)), '..', 'public')
-  rmSync(join(root, 'splash'), { recursive: true, force: true })
+  // 只删旧的启动图，目录里的其它文件（check.html）保留
   mkdirSync(join(root, 'splash'), { recursive: true })
+  for (const f of readdirSync(join(root, 'splash'))) {
+    if (/^apple-splash-.*\.png$/.test(f)) rmSync(join(root, 'splash', f))
+  }
   const entries = splashEntries()
   for (const e of entries) {
     await sharp(Buffer.from(splashSvg(e)))
