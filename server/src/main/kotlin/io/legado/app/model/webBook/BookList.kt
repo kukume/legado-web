@@ -22,6 +22,7 @@ import io.legado.app.utils.NetworkUtils
 import io.legado.app.utils.StringUtils.wordCountFormat
 import io.legado.app.utils.fromJsonArray
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ensureActive
 
 /**
@@ -94,12 +95,20 @@ object BookList {
         currentCoroutineContext().ensureActive()
         if (collections.isEmpty() && bookSource.bookUrlPattern.isNullOrEmpty()) {
             Debug.log(bookSource.bookSourceUrl, "└列表为空,按详情页解析")
-            getInfoItem(
-                bookSource, analyzeRule, analyzeUrl, body, baseUrl, ruleData.getVariable(),
-                isRedirect, filter
-            )?.let { searchBook ->
-                searchBook.infoHtml = body
-                bookList.add(searchBook)
+            // 多半是没搜到结果（或网站返回了错误页），按详情页解析出错时当作没有结果，不报错
+            // （阅读 App 搜索时也不显示这类错误）；调试时仍在日志里记下原因
+            try {
+                getInfoItem(
+                    bookSource, analyzeRule, analyzeUrl, body, baseUrl, ruleData.getVariable(),
+                    isRedirect, filter
+                )?.let { searchBook ->
+                    searchBook.infoHtml = body
+                    bookList.add(searchBook)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Debug.log(bookSource.bookSourceUrl, "└按详情页解析失败,当作没有结果:${e.localizedMessage}")
             }
         } else {
             val ruleName = analyzeRule.splitSourceRule(bookListRule.name)

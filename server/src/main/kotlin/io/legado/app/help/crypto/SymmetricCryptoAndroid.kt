@@ -11,9 +11,16 @@ import java.nio.charset.Charset
 class SymmetricCryptoAndroid(
     algorithm: String,
     key: ByteArray?,
-) : SymmetricCrypto(algorithm, buildKey(algorithm, key)) {
+) : SymmetricCrypto(normalize(algorithm), buildKey(algorithm, key)) {
 
     companion object {
+        /**
+         * Android 支持 PKCS7Padding，JDK 只认 PKCS5Padding。JDK 的 PKCS5Padding 按算法的块长填充，
+         * 对 AES、DES 等与 PKCS7 完全相同，换个名字即可
+         */
+        fun normalize(algorithm: String): String =
+            algorithm.replace("PKCS7Padding", "PKCS5Padding", ignoreCase = true)
+
         /**
          * JDK 要求 SecretKey 的算法名为主算法（如 AES），不能带模式和填充（Android 不校验）
          */

@@ -100,6 +100,10 @@ object RhinoWrapFactory : WrapFactory() {
         scope: VarScope,
         javaClass: Class<*>
     ): Scriptable {
+        // java.lang.Thread 只给 sleep（见 ScriptThread）
+        if (javaClass == Thread::class.java) {
+            return RhinoClassShutter.wrapJavaClass(scope, io.legado.app.help.ScriptThread::class.java)
+        }
         if (!RhinoClassShutter.visibleToScripts(javaClass)) {
             @Suppress("DEPRECATION")
             val pkg = NativeJavaPackage(javaClass.name, null)

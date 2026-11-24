@@ -79,8 +79,9 @@ object RhinoClassShutter : ClassShutter {
             "sun.misc.Unsafe",
             // 可实例化任意类、调用任意方法的“表达式/反序列化”类（XMLDecoder、Expression、Statement 等）
             "java.beans",
-            // 起线程可绕过书源超时和取消；下面几类线程池同理
-            "java.lang.Thread",
+            // 起线程可绕过书源超时和取消；下面几类线程池同理。
+            // java.lang.Thread 不按名字屏蔽：书源常用 java.lang.Thread.sleep 等待，
+            // 由 RhinoWrapFactory 换成只有 sleep 的 ScriptThread；Thread 实例仍由下面的 protectedClasses 挡住
             "java.util.concurrent.Executors",
             "java.util.concurrent.ThreadPoolExecutor",
             "java.util.concurrent.ScheduledThreadPoolExecutor",

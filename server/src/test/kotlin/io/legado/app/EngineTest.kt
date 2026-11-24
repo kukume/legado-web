@@ -292,6 +292,14 @@ class EngineTest {
             assertEquals("127.0.0.1", source.evalJS("""String(new Packages.java.net.URL("http://127.0.0.1/x").getHost())"""))
             // 起线程可绕过超时 / 取消
             blocked("""var t=new Packages.java.lang.Thread(function(){}); t.start()""", "java.lang.Thread")
+            blocked("""Packages.java.lang.Thread.currentThread().getName()""", "Thread.currentThread")
+            // 只放开 sleep（书源常用）
+            source.evalJS("""Packages.java.lang.Thread.sleep(20)""")
+            // 安卓才有的类 / 写法
+            assertEquals(true, source.evalJS("""Packages.android.text.TextUtils.isEmpty("")"""))
+            assertEquals("a,b", source.evalJS("""String(Packages.android.text.TextUtils.join(",", ["a","b"]))"""))
+            assertEquals("hello", source.evalJS(
+                """var c=java.createSymmetricCrypto("AES/ECB/PKCS7Padding","1234567890123456"); String(c.decryptStr(c.encryptBase64("hello")))"""))
             // System.getProperty 信息泄露
             blocked("""Packages.java.lang.System.getProperty("user.dir")""", "System.getProperty")
         }

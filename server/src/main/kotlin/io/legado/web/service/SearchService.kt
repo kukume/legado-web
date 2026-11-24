@@ -60,7 +60,9 @@ class SearchService(
         sourceIds: Set<Long>?,
         emit: suspend (SearchEvent) -> Unit,
     ) = coroutineScope {
+        // 没有搜索地址的书源（只用于发现等）不参加搜索，与阅读 App 相同
         val sources = sourceService.enabledSources(user, group, sourceIds)
+            .filter { it.source.isJsSource() || !it.source.searchUrl.isNullOrBlank() }
         val total = sources.size
         if (total == 0) {
             emit(SearchEvent.Progress(0, 0, "", "没有可用的书源"))
