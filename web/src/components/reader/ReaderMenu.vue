@@ -15,6 +15,12 @@ defineProps<{
   curIndex: number
   curTitle: string
   progressPercent: string
+  /** 本章进度（0-10000），底部进度条显示、拖动的是本章内的位置 */
+  chapterPos: number
+  /** 翻页模式：进度条按页拖动 */
+  paged: boolean
+  page: number
+  pageCount: number
   reloading: boolean
   isComic: boolean
   isFullscreen: boolean
@@ -30,7 +36,8 @@ defineEmits<{
   info: []
   prevChapter: []
   nextChapter: []
-  goChapter: [index: number]
+  /** 跳到本章内的位置（0-10000） */
+  seek: [pos: number]
   toc: []
   settings: []
   readAloud: []
@@ -66,13 +73,25 @@ defineEmits<{
       <div class="progress-row">
         <n-button text :disabled="curIndex <= 0" @click="$emit('prevChapter')">{{ t('上一章') }}</n-button>
         <n-slider
-          :value="curIndex"
+          v-if="paged"
+          :value="Math.min(page, Math.max(0, pageCount - 1))"
           :min="0"
-          :max="Math.max(0, chapters.length - 1)"
+          :max="Math.max(0, pageCount - 1)"
           :step="1"
-          :format-tooltip="(v: number) => chapters[v]?.title ?? ''"
+          :disabled="pageCount <= 1"
+          :format-tooltip="(v: number) => `${v + 1} / ${pageCount}`"
           style="flex: 1"
-          @update:value="(v: number) => $emit('goChapter', v)"
+          @update:value="(v: number) => $emit('seek', (v / Math.max(1, pageCount)) * 10000)"
+        />
+        <n-slider
+          v-else
+          :value="Math.round(chapterPos)"
+          :min="0"
+          :max="10000"
+          :step="1"
+          :format-tooltip="(v: number) => `${Math.round(v / 100)}%`"
+          style="flex: 1"
+          @update:value="(v: number) => $emit('seek', v)"
         />
         <n-button text :disabled="curIndex >= chapters.length - 1" @click="$emit('nextChapter')">{{ t('下一章') }}</n-button>
       </div>

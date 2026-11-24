@@ -372,6 +372,23 @@ function jumpWithinChapter(index: number, pos: number): boolean {
   return true
 }
 
+/** 底部菜单的进度条：跳到本章内的位置（拖动时连续调用，不用动画） */
+function seekInChapter(pos: number) {
+  const index = curIndex.value
+  if (isPaged.value) {
+    if (!jumpWithinChapter(index, pos)) return goChapter(index, pos)
+  } else {
+    const el = segRefs.get(index)
+    if (!el || !scroller.value) return goChapter(index, pos)
+    cancelScrollAnimation(scroller.value)
+    scroller.value.scrollTop = el.offsetTop + (pos / 10000) * el.offsetHeight
+    // 拖动进度条引起的滚动不收起菜单
+    rememberScrollTop()
+    curPos.value = pos
+  }
+  scheduleSave()
+}
+
 window.addEventListener("legado:progress", onRemoteProgress)
 onBeforeUnmount(() => window.removeEventListener("legado:progress", onRemoteProgress))
 
@@ -1224,6 +1241,10 @@ function onChanged(nb: Book) {
         :cur-index="curIndex"
         :cur-title="curTitle"
         :progress-percent="progressPercent"
+        :chapter-pos="curPos"
+        :paged="isPaged"
+        :page="page"
+        :page-count="pageCount"
         :reloading="reloading"
         :is-comic="isComic"
         :is-fullscreen="isFullscreen"
@@ -1235,7 +1256,7 @@ function onChanged(nb: Book) {
         @info="router.push({ name: 'book', params: { id: bookId } })"
         @prev-chapter="prevChapter"
         @next-chapter="nextChapter"
-        @go-chapter="goChapter"
+        @seek="seekInChapter"
         @toc="showToc = true"
         @settings="showSettings = true"
         @read-aloud="tts.active ? (menuVisible = false) : ttsStart()"
